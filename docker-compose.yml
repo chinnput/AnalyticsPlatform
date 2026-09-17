@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ap-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ap_user
+      POSTGRES_PASSWORD: ap_password
+      POSTGRES_DB: analytics_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ap_user -d analytics_platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  analysis-service:
+    build: ./analysis-service
+    container_name: ap-analysis
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: docker
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build: ./web
+    container_name: ap-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://ap_user:ap_password@postgres:5432/analytics_platform
+      ANALYSIS_SERVICE_URL: http://analysis-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      analysis-service:
+        condition: service_started
+
+volumes:
+  pgdata:

@@ -1,0 +1,141 @@
+# Roadmap — แผนลงมือทำเป็น Step
+
+> ทำตามลำดับ Phase 0 → 6 แต่ละ Phase มี **Goal**, **Steps**, **Definition of Done (DoD)**
+> checklist ละเอียดอยู่ที่ [tasks-checklist.md](tasks-checklist.md)
+
+---
+
+## Phase 0 — Project Setup
+
+**Goal:** โครง monorepo รันได้ (web + analysis-service + postgres)
+
+**Steps**
+1. สร้าง monorepo: `web/` (Next.js TS) + `analysis-service/` (FastAPI) + `docs/`
+2. `docker-compose.yml`: postgres + web + analysis-service
+3. Next.js: init + TailwindCSS + ESLint/Prettier
+4. Prisma: init + connect postgres + migrate เปล่า
+5. FastAPI: skeleton + `/health` endpoint
+6. เชื่อม web → FastAPI ได้ (call `/health` จาก Next.js API)
+
+**DoD:** `docker compose up` แล้วเปิดหน้าเว็บได้ + hit `/health` ผ่าน
+
+---
+
+## Phase 1 — Metadata CRUD
+
+**Goal:** จัดการ DataSource / Tag / Group ผ่าน UI
+
+**Steps**
+1. Prisma schema: `DataSource, Tag, Group, TagGroupMember, User, AuditLog`
+2. Migrate + seed ข้อมูลตัวอย่าง
+3. API (Next.js): CRUD DataSource / Tag / Group
+4. UI: หน้า list + form (create/edit/deactivate) ของ 3 entity
+5. Tag ↔ Group mapping (many-to-many) UI
+6. Test connection ของ DataSource (เรียก FastAPI `/connections/test`)
+7. Credential เก็บเป็น `connectionReference` เท่านั้น (ไม่ plaintext)
+
+**DoD:** เพิ่ม/แก้ tag, จัด group, test connection ได้จาก UI
+
+---
+
+## Phase 2 — Connector + Data Fetch
+
+**Goal:** ดึง time-series จริงจาก SQL/PI → format กลาง
+
+**Steps**
+1. FastAPI connector base interface (`BaseConnector.fetch(...)`)
+2. `sql_adapter.py` — parameterized query, read-only
+3. `pi_adapter.py` — interface พร้อม (backend เลือกทีหลัง: PI Web API / OLEDB)
+4. Normalize → columnar standard format
+5. Resample (interval + method: mean/last/interpolated)
+6. `POST /data` endpoint
+7. Next.js: proxy `/api/data` → FastAPI `/data`
+
+**DoD:** ขอข้อมูล 1 tag ช่วงเวลาหนึ่ง แล้วได้ columnar JSON กลับมา
+
+---
+
+## Phase 3 — Interactive Chart Workspace (Must-have UX)
+
+**Goal:** chart interactive multi-series (ยืม pattern จาก TradingView — zoom/pan/crosshair)
+
+**Steps**
+1. ติดตั้ง ECharts + wrapper (`ChartCanvas.tsx`)
+2. Render line chart จาก `/data`
+3. dataZoom (scroll zoom + slider) + pan
+4. Crosshair + tooltip หลาย series
+5. Multi-series overlay + legend toggle
+6. `TimeRangeSelector` (preset + custom)
+7. `TagSearch` + `TagTreeSidebar` เพิ่ม tag เข้า chart
+8. `ChartWorkspace` state management
+
+**DoD:** ค้น tag → เพิ่มเข้า chart → zoom/pan/crosshair ได้ครบ
+
+> ความหลากหลาย (chart types, layout modes) เพิ่มใน Phase 4+ ตาม [tradingview-ux.md](tradingview-ux.md#6-ความหลากหลาย-จุดที่เหนือกว่า-tradingview)
+
+---
+
+## Phase 4 — Analysis Engine
+
+**Goal:** วิเคราะห์ทั้ง 6 แบบ
+
+**Steps**
+1. `analysis/` modules: summary, sd, boxplot, kde, correlation, clustering
+2. `POST /analyze` endpoint (รับ analysis.type)
+3. Next.js proxy `/api/analyze`
+4. `AnalysisPanel.tsx` tabs
+5. Visualization mapping:
+   - summary → table
+   - SD → line/band ใน sub-pane
+   - boxplot → ECharts boxplot
+   - KDE → density curve
+   - correlation → heatmap
+   - clustering → scatter สีตาม cluster
+
+**DoD:** เลือก tag + analysis type → เห็นผลเป็น chart/table
+
+---
+
+## Phase 5 — Filter / Cleaning
+
+**Goal:** pipeline ทำความสะอาดข้อมูล config-driven
+
+**Steps**
+1. `pipeline/filter.py`: quality, range, flatline, zscore, iqr
+2. รับ `filters[]` ใน `/data` และ `/analyze`
+3. คืน meta: `rowsBefore`, `rowsAfterFilter`
+4. UI: filter config panel (เปิด/ปิดแต่ละ filter + params)
+
+**DoD:** ตั้ง filter แล้วข้อมูล/ผลวิเคราะห์เปลี่ยนตาม + เห็นจำนวน row ที่ถูกตัด
+
+---
+
+## Phase 6 — Workspace & Templates
+
+**Goal:** save/reuse layout + template + audit
+
+**Steps**
+1. Prisma: `Workspace`, `AnalysisTemplate`
+2. Save `WorkspaceState` → `layoutJson`
+3. Load workspace กลับมา render เหมือนเดิม
+4. Analysis template (save config วิเคราะห์)
+5. Export result (CSV / PNG)
+6. Audit log ทุก query/analysis
+
+**DoD:** save workspace → refresh/เปิดใหม่ → กลับมาได้เหมือนเดิม + export ได้
+
+---
+
+## สรุป Dependency
+
+```mermaid
+flowchart LR
+    P0[Phase 0 Setup] --> P1[Phase 1 CRUD]
+    P1 --> P2[Phase 2 Connector]
+    P2 --> P3[Phase 3 Chart]
+    P2 --> P4[Phase 4 Analysis]
+    P4 --> P5[Phase 5 Filter]
+    P3 --> P6[Phase 6 Workspace]
+    P4 --> P6
+    P5 --> P6
+```
