@@ -19,8 +19,15 @@ export default async function Home() {
     <main className="mx-auto max-w-3xl px-6 py-16">
       <h1 className="text-3xl font-semibold">Analytics Platform</h1>
       <p className="mt-2 text-neutral-400">
-        Tag management &amp; analysis workspace — Phase 0 setup
+        ดู/วิเคราะห์ข้อมูลจาก SQL Server (read-only)
       </p>
+
+      <a
+        href="/connect"
+        className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500"
+      >
+        เชื่อมต่อ SQL Server →
+      </a>
 
       <div className="mt-10 grid gap-4 sm:grid-cols-2">
         <StatusCard label="Web (Next.js)" ok healthy="running" />

@@ -20,8 +20,8 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# Prisma
-web/prisma/*.db
+# Local metadata storage (workspace/layout JSON)
+web/data/
 
 # OS / editor
 .DS_Store

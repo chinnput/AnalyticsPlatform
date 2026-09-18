@@ -7,34 +7,30 @@
 
 ## Phase 0 — Project Setup
 
-**Goal:** โครง monorepo รันได้ (web + analysis-service + postgres)
+**Goal:** โครง monorepo รันได้ (web + analysis-service)
 
 **Steps**
 1. สร้าง monorepo: `web/` (Next.js TS) + `analysis-service/` (FastAPI) + `docs/`
-2. `docker-compose.yml`: postgres + web + analysis-service
-3. Next.js: init + TailwindCSS + ESLint/Prettier
-4. Prisma: init + connect postgres + migrate เปล่า
-5. FastAPI: skeleton + `/health` endpoint
-6. เชื่อม web → FastAPI ได้ (call `/health` จาก Next.js API)
+2. Next.js: init + TailwindCSS + ESLint/Prettier
+3. FastAPI: skeleton + `/health` endpoint
+4. เชื่อม web → FastAPI ได้ (call `/health` จาก Next.js API)
 
-**DoD:** `docker compose up` แล้วเปิดหน้าเว็บได้ + hit `/health` ผ่าน
+**DoD:** เปิดหน้าเว็บได้ + hit `/health` ผ่าน
 
 ---
 
-## Phase 1 — Metadata CRUD
+## Phase 1 — เชื่อม SQL Server + เลือก Tag
 
-**Goal:** จัดการ DataSource / Tag / Group ผ่าน UI
+**Goal:** เชื่อม SQL Server ต้นทาง (read-only) + เลือก table/column ที่จะดู
 
 **Steps**
-1. Prisma schema: `DataSource, Tag, Group, TagGroupMember, User, AuditLog`
-2. Migrate + seed ข้อมูลตัวอย่าง
-3. API (Next.js): CRUD DataSource / Tag / Group
-4. UI: หน้า list + form (create/edit/deactivate) ของ 3 entity
-5. Tag ↔ Group mapping (many-to-many) UI
-6. Test connection ของ DataSource (เรียก FastAPI `/connections/test`)
-7. Credential เก็บเป็น `connectionReference` เท่านั้น (ไม่ plaintext)
+1. FastAPI connector: `base.py` + `sql_server.py` (pymssql, read-only)
+2. API: `/connections/test`, `/databases`, `/tables`, `/columns`
+3. UI: หน้ากรอก connection (host/user/pass/db) + ปุ่ม test
+4. UI: browse databases → tables → columns → เลือก time column + value column
+5. เก็บ tag/group ที่เลือกเป็นไฟล์ JSON (`web/data/`)
 
-**DoD:** เพิ่ม/แก้ tag, จัด group, test connection ได้จาก UI
+**DoD:** กรอก connection → test ผ่าน → เลือก tag → save เป็นไฟล์ได้
 
 ---
 
@@ -115,12 +111,10 @@
 **Goal:** save/reuse layout + template + audit
 
 **Steps**
-1. Prisma: `Workspace`, `AnalysisTemplate`
-2. Save `WorkspaceState` → `layoutJson`
-3. Load workspace กลับมา render เหมือนเดิม
-4. Analysis template (save config วิเคราะห์)
-5. Export result (CSV / PNG)
-6. Audit log ทุก query/analysis
+1. Save `WorkspaceState` → ไฟล์ JSON (`web/data/workspace_*.json`)
+2. Load workspace กลับมา render เหมือนเดิม
+3. Analysis template (save config วิเคราะห์เป็นไฟล์)
+4. Export result (CSV / PNG)
 
 **DoD:** save workspace → refresh/เปิดใหม่ → กลับมาได้เหมือนเดิม + export ได้
 
@@ -130,7 +124,7 @@
 
 ```mermaid
 flowchart LR
-    P0[Phase 0 Setup] --> P1[Phase 1 CRUD]
+    P0[Phase 0 Setup] --> P1[Phase 1 SQL Server]
     P1 --> P2[Phase 2 Connector]
     P2 --> P3[Phase 3 Chart]
     P2 --> P4[Phase 4 Analysis]

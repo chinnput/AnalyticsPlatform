@@ -23,14 +23,15 @@
 | ส่วน | เทคโนโลยี |
 |---|---|
 | Frontend + Main App | **Next.js + TypeScript** |
-| Metadata DB | **PostgreSQL** |
-| ORM | **Prisma** |
+| Metadata storage | **ไฟล์ JSON ในเครื่อง** (`web/data/`) — ไม่มี DB ของเราเอง |
 | Data + Analysis Service | **Python FastAPI** (รวม Connector Layer) |
-| Connector | Adapter pattern: SQL adapter, PI adapter |
+| Connector | Adapter pattern: **SQL Server** (pymssql), PI adapter (ภายหลัง) |
 | Analysis libs | pandas, numpy, scipy, scikit-learn |
 | Charting | **ECharts** หรือ **Plotly** (แนะนำ ECharts สำหรับ TradingView-like) |
 
-**Key decision:** Connector Layer อยู่ฝั่ง **FastAPI** → pipeline `fetch → normalize → resample → filter → analyze` อยู่ที่เดียว
+**Key decisions:**
+- Connector Layer อยู่ฝั่ง **FastAPI** → pipeline `fetch → normalize → resample → filter → analyze` อยู่ที่เดียว
+- **ไม่มี database ของเราเอง** — ข้อมูล time-series ดึงจาก source (SQL Server) ที่มีอยู่แล้ว, metadata (layout/group) เก็บเป็นไฟล์ JSON ในเครื่อง (เหมาะกับใช้คนเดียว, เพิ่ม DB ทีหลังได้)
 
 ---
 
@@ -47,8 +48,8 @@
 
 | Phase | ชื่อ | ผลลัพธ์ |
 |---|---|---|
-| **0** | Project Setup | monorepo, docker-compose, Prisma, FastAPI skeleton รันได้ |
-| **1** | Metadata CRUD | จัดการ DataSource / Tag / Group ผ่าน UI |
+| **0** | Project Setup | monorepo, Next.js + FastAPI skeleton รันได้ |
+| **1** | เชื่อม SQL Server | test connection, list databases/tables/columns, เลือก tag |
 | **2** | Connector + Data Fetch | ดึง time-series จาก SQL/PI → format กลาง |
 | **3** | TradingView Chart | chart interactive, multi-series, zoom/pan, crosshair |
 | **4** | Analysis Engine | summary, SD, boxplot, KDE, correlation, clustering |
@@ -69,24 +70,22 @@ analytics-platform/
 │  ├─ tradingview-ux.md
 │  ├─ roadmap-steps.md
 │  └─ tasks-checklist.md
-├─ docker-compose.yml
 ├─ web/                       # Next.js + TypeScript (frontend + orchestration API)
 │  ├─ app/
+│  │  └─ api/workspace/       # save/load layout เป็นไฟล์ JSON
 │  ├─ components/
 │  │  └─ chart/               # TradingView-like chart components
-│  ├─ lib/
-│  ├─ prisma/
-│  │  └─ schema.prisma
+│  ├─ lib/                    # storage.ts (JSON files), types.ts, config.ts
+│  ├─ data/                   # metadata JSON (gitignored)
 │  └─ package.json
 └─ analysis-service/          # Python FastAPI (connector + analysis)
    ├─ app/
-   │  ├─ connectors/          # sql_adapter.py, pi_adapter.py, base.py
+   │  ├─ connectors/          # base.py, sql_server.py, (pi later)
    │  ├─ pipeline/            # normalize, resample, filter
    │  ├─ analysis/            # stats, correlation, clustering, kde
-   │  ├─ api/                 # routes
+   │  ├─ api/                 # routes (health, connections)
    │  └─ main.py
-   ├─ requirements.txt
-   └─ pyproject.toml
+   └─ requirements.txt
 ```
 
 ---

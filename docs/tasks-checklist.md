@@ -5,32 +5,32 @@
 ---
 
 ## Phase 0 — Project Setup
-- [ ] สร้างโครง monorepo (`web/`, `analysis-service/`, `docs/`)
-- [ ] `docker-compose.yml` (postgres + web + analysis-service)
-- [ ] Next.js init + TypeScript
-- [ ] TailwindCSS + ESLint + Prettier
-- [ ] Prisma init + เชื่อม postgres
-- [ ] Prisma migrate เปล่า สำเร็จ
-- [ ] FastAPI skeleton + `/health`
-- [ ] Next.js เรียก FastAPI `/health` ผ่าน
-- [ ] README dev setup
+- [x] สร้างโครง monorepo (`web/`, `analysis-service/`, `docs/`)
+- [x] Next.js init + TypeScript
+- [x] TailwindCSS + ESLint + Prettier
+- [x] FastAPI skeleton + `/health`
+- [x] Next.js เรียก FastAPI `/health` ผ่าน
+- [x] README dev setup
 
-## Phase 1 — Metadata CRUD
-- [ ] Prisma schema: DataSource
-- [ ] Prisma schema: Tag
-- [ ] Prisma schema: Group + parentId
-- [ ] Prisma schema: TagGroupMember
-- [ ] Prisma schema: User, AuditLog
-- [ ] Migrate + seed ตัวอย่าง
-- [ ] API CRUD: DataSource
-- [ ] API CRUD: Tag
-- [ ] API CRUD: Group
-- [ ] UI list + form: DataSource
-- [ ] UI list + form: Tag
-- [ ] UI list + form: Group
-- [ ] UI: Tag ↔ Group mapping
-- [ ] Test connection (FastAPI `/connections/test`)
-- [ ] Credential เก็บเป็น reference เท่านั้น
+## Phase 1 — เชื่อม SQL Server + เลือก Tag
+- [x] `base.py` connector interface
+- [x] `sql_server.py` (pymssql, read-only)
+- [x] API `/connections/test`
+- [x] API `/connections/databases`
+- [x] API `/connections/tables`
+- [x] API `/connections/columns`
+- [x] storage.ts + workspace API (save/load JSON)
+- [x] UI: หน้ากรอก connection + ปุ่ม test (`/connect`)
+- [x] UI: browse databases → tables → columns
+- [ ] UI: เลือก time column + value column
+- [ ] save tag/group ที่เลือกเป็นไฟล์ JSON
+
+### PI Server connector (MI_CUBE PI Web API)
+- [x] `pi_server.py` (POST + JSON, read-only)
+- [x] API `/pi/test`
+- [x] API `/pi/fetch` (multi-tag → DataFrame)
+- [x] token เก็บใน `.env` (gitignored)
+- [x] ทดสอบ fetch tag จริงได้ข้อมูลกลับ
 
 ## Phase 2 — Connector + Data Fetch
 - [ ] `BaseConnector` interface
@@ -83,14 +83,11 @@
 - [ ] UI filter config panel
 
 ## Phase 6 — Workspace & Templates
-- [ ] Prisma: Workspace
-- [ ] Prisma: AnalysisTemplate
-- [ ] Save WorkspaceState → layoutJson
+- [ ] Save WorkspaceState → ไฟล์ JSON (`web/data/`)
 - [ ] Load workspace
-- [ ] Analysis template save/load
+- [ ] Analysis template save/load (ไฟล์)
 - [ ] Export CSV
 - [ ] Export PNG
-- [ ] Audit log ทุก query/analysis
 
 ---
 

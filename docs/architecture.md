@@ -10,26 +10,26 @@ flowchart TB
 
     subgraph Web["Next.js App (TypeScript)"]
         API["API Routes / Server Actions (orchestration)"]
-        Prisma["Prisma ORM"]
+        STORE["storage.ts (อ่าน/เขียนไฟล์ JSON)"]
     end
 
-    subgraph PG["PostgreSQL (Metadata only)"]
-        META["users, tags, groups, data_sources,\nmappings, templates, workspaces, audit_log"]
+    subgraph FS["Local files (web/data/)"]
+        META["workspace_*.json (layout, groups, tag refs)"]
     end
 
     subgraph Py["Python FastAPI (Data + Analysis Service)"]
-        CONN["Connector Layer (SQL / PI adapters)"]
+        CONN["Connector Layer (SQL Server, PI ทีหลัง)"]
         PIPE["Pipeline: normalize -> resample -> filter"]
         ANALYSIS["Analysis Engine (pandas/numpy/scipy/sklearn)"]
     end
 
     subgraph Sources["External Sources (read-only)"]
-        SQL["SQL Server / DB"]
-        PISVR["PI Server"]
+        SQL["SQL Server"]
+        PISVR["PI Server (ทีหลัง)"]
     end
 
     UI --> API
-    API --> Prisma --> META
+    API --> STORE --> META
     API -->|fetch+analyze| CONN
     CONN --> SQL
     CONN --> PISVR
@@ -40,8 +40,8 @@ flowchart TB
 **Key decisions**
 
 - Connector Layer อยู่ฝั่ง **FastAPI** → `fetch → normalize → resample → filter → analyze` ที่เดียว
-- Next.js = UI + CRUD metadata + orchestration
-- V1: ไม่ทำ ingestion, ไม่เก็บ time-series ซ้ำ, ดึงตรงจาก source
+- Next.js = UI + orchestration + เก็บ metadata เป็นไฟล์ JSON
+- **ไม่มี database ของเราเอง** — V1 ไม่เก็บ time-series ซ้ำ, ดึงตรงจาก source
 
 ---
 
@@ -63,71 +63,41 @@ User
 
 ---
 
-## 3. Data Model (Metadata)
+## 3. Metadata (ไฟล์ JSON — ไม่มี DB)
 
-```mermaid
+metadata เก็บเป็นไฟล์ JSON ใน `web/data/` (gitignored) โครงสร้างตาม `web/lib/types.ts`:
 
-erDiagram
-    DataSource ||--o{ Tag : has
-    Tag ||--o{ TagGroupMember : in
-    Group ||--o{ TagGroupMember : contains
-    Group ||--o{ Group : parent
-    User ||--o{ AuditLog : performs
-    User ||--o{ Workspace : owns
-
-    DataSource {
-        uuid id PK
-        string name
-        string type "SQL | PI"
-        string description
-        string connectionReference "secret ref, NOT plaintext"
-        boolean active
+```jsonc
+// web/data/workspace_default.json
+{
+  "name": "default",
+  "layout": "single",            // single | grid-2x2 | tabs
+  "panels": [
+    {
+      "id": "p1",
+      "title": "Reactor Temp",
+      "chartType": "line",        // line | area | bar | scatter
+      "tags": [
+        {
+          "source": "sql-prod",
+          "database": "ProductionReport",
+          "table": "dbo.Roll",
+          "timeColumn": "User_create_date",
+          "valueColumn": "Roll_length",
+          "label": "Roll length"
+        }
+      ]
     }
-    Tag {
-        uuid id PK
-        string tagName
-        string displayName
-        string description
-        uuid sourceId FK
-        string sourceTagName
-        string dataType
-        string unit
-        string timezone
-        boolean active
-    }
-    Group {
-        uuid id PK
-        string name
-        string code
-        string description
-        uuid parentId FK
-    }
-    TagGroupMember {
-        uuid tagId FK
-        uuid groupId FK
-    }
-    AnalysisTemplate {
-        uuid id PK
-        string name
-        string analysisType
-        json configJson
-    }
-    Workspace {
-        uuid id PK
-        uuid userId FK
-        string name
-        json layoutJson "chart panes, series, indicators"
-    }
-    AuditLog {
-        uuid id PK
-        uuid userId FK
-        string action
-        json detail
-        datetime createdAt
-    }
+  ],
+  "groups": [
+    { "id": "g1", "name": "Reactor Zone A", "tags": [] }
+  ],
+  "updatedAt": "2026-09-18T00:00:00Z"
+}
 ```
 
-> `Workspace` = โต๊ะทำงานแบบ TradingView (บันทึก layout, series, indicators, time range)
+> `Workspace` = โต๊ะทำงานแบบ TradingView (บันทึก layout, panels, tag refs)
+> save/load ผ่าน `GET/POST /api/workspace?name=...`
 
 ---
 
@@ -219,18 +189,15 @@ Columnar (แนะนำสำหรับ payload ใหญ่ / chart):
 
 | หัวข้อ  | แนวทาง                                                                         |
 | ------------- | ------------------------------------------------------------------------------------ |
-| Credentials   | เก็บแค่`connectionReference`, resolve จาก secret store / encrypt at rest |
+| Credentials   | เก็บใน `web/.env` (gitignored), ไม่ commit; ไม่เขียน plaintext ลง JSON |
 | SQL injection | parameterized query เสมอ; user เลือก tag/time เท่านั้น              |
 | Read-only     | ใช้ account สิทธิ์ read/SELECT อย่างเดียว                         |
 | Timezone      | เก็บ/ส่ง UTC (ISO 8601), แปลง local ที่ UI                             |
-| Audit         | log ทุก query/analysis                                                            |
 
 ---
 
 ## 8. Open Decisions (ต้องตัดสินใจ)
 
 1. **PI access** — PI Web API (REST) vs OLEDB/SQL → ออกแบบ PI adapter เป็น interface เดียว, เลือก backend ทีหลัง
-2. **Auth/RBAC** — NextAuth? role: admin (จัดการ source) vs analyst (วิเคราะห์)
-3. **Secret store** — Vault / cloud secret manager / encrypted column
-4. **Deployment** — Docker Compose (dev) → managed (prod)?
-5. **Charting lib** — ECharts (แนะนำ, dataZoom ดี) vs Plotly
+2. **Charting lib** — ECharts (แนะนำ, dataZoom ดี) vs Plotly
+3. **หลายคน/หลายเครื่อง** — ถ้าอนาคตต้องแชร์ ค่อยเพิ่ม DB (ตอนนี้ไฟล์ JSON พอ)
