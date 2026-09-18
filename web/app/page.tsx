@@ -19,15 +19,23 @@ export default async function Home() {
     <main className="mx-auto max-w-3xl px-6 py-16">
       <h1 className="text-3xl font-semibold">Analytics Platform</h1>
       <p className="mt-2 text-neutral-400">
-        ดู/วิเคราะห์ข้อมูลจาก SQL Server (read-only)
+        View & analyze time-series data (read-only)
       </p>
 
-      <a
-        href="/connect"
-        className="mt-4 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500"
-      >
-        เชื่อมต่อ SQL Server →
-      </a>
+      <div className="mt-4 flex gap-3">
+        <a
+          href="/chart"
+          className="inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500"
+        >
+          PI Server Chart →
+        </a>
+        <a
+          href="/connect"
+          className="inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500"
+        >
+          Connect SQL Server →
+        </a>
+      </div>
 
       <div className="mt-10 grid gap-4 sm:grid-cols-2">
         <StatusCard label="Web (Next.js)" ok healthy="running" />
@@ -47,7 +55,7 @@ export default async function Home() {
       {!health.ok && (
         <p className="mt-6 rounded-lg border border-amber-800/50 bg-amber-950/30 p-4 text-sm text-amber-300">
           Analysis service is not reachable. Start it with{" "}
-          <code className="rounded bg-black/40 px-1">uvicorn app.main:app --reload --port 8000</code>{" "}
+          <code className="rounded bg-black/40 px-1">uvicorn app.main:app --reload --port 8001</code>{" "}
           in the <code className="rounded bg-black/40 px-1">analysis-service</code> folder.
         </p>
       )}

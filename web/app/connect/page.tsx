@@ -66,10 +66,10 @@ export default function ConnectPage() {
       const data = await post("databases");
       setDatabases(data.databases ?? []);
       setTestState("ok");
-      setMessage("เชื่อมต่อสำเร็จ");
+      setMessage("Connected");
     } catch (e) {
       setTestState("fail");
-      setMessage(e instanceof Error ? e.message : "เชื่อมต่อไม่สำเร็จ");
+      setMessage(e instanceof Error ? e.message : "Connection failed");
     }
   }
 
@@ -84,7 +84,7 @@ export default function ConnectPage() {
       const data = await post("tables", { database: db });
       setTables(data.tables ?? []);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "โหลด tables ไม่สำเร็จ");
+      setMessage(e instanceof Error ? e.message : "Failed to load tables");
     } finally {
       setBusy(false);
     }
@@ -102,7 +102,7 @@ export default function ConnectPage() {
       });
       setColumns(data.columns ?? []);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "โหลด columns ไม่สำเร็จ");
+      setMessage(e instanceof Error ? e.message : "Failed to load columns");
     } finally {
       setBusy(false);
     }
@@ -110,9 +110,9 @@ export default function ConnectPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-12">
-      <h1 className="text-2xl font-semibold">เชื่อมต่อ SQL Server</h1>
+      <h1 className="text-2xl font-semibold">Connect SQL Server</h1>
       <p className="mt-1 text-sm text-neutral-400">
-        กรอกข้อมูลเชื่อมต่อ (read-only) แล้วเลือก database → table → column
+        Enter connection details (read-only), then pick database → table → column
       </p>
 
       <section className="mt-8 grid gap-4 rounded-lg border border-neutral-800 bg-neutral-900/50 p-5 sm:grid-cols-2">
@@ -147,10 +147,10 @@ export default function ConnectPage() {
             onChange={(e) => update("password", e.target.value)}
           />
         </Field>
-        <Field label="Database (ถ้าจำเป็น เช่น sa ต้องระบุ)">
+        <Field label="Database (optional)">
           <input
             className="input"
-            placeholder="เว้นว่าง = master"
+            placeholder="empty = master"
             value={cfg.database}
             onChange={(e) => update("database", e.target.value)}
           />
@@ -162,7 +162,7 @@ export default function ConnectPage() {
             onClick={testConnection}
             disabled={testState === "loading" || !cfg.host || !cfg.user}
           >
-            {testState === "loading" ? "กำลังเชื่อม..." : "Test connection"}
+            {testState === "loading" ? "Connecting..." : "Test connection"}
           </button>
           {message && (
             <span
@@ -189,13 +189,13 @@ export default function ConnectPage() {
             items={tables}
             selected={selectedTable}
             onSelect={loadColumns}
-            empty={selectedDb ? "ไม่มี table" : "เลือก database ก่อน"}
+            empty={selectedDb ? "No tables" : "Select a database first"}
           />
           <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-3">
             <h3 className="mb-2 text-sm font-medium text-neutral-300">Columns</h3>
             {columns.length === 0 ? (
               <p className="text-xs text-neutral-500">
-                {selectedTable ? "..." : "เลือก table ก่อน"}
+                {selectedTable ? "..." : "Select a table first"}
               </p>
             ) : (
               <ul className="max-h-80 overflow-y-auto text-sm">
