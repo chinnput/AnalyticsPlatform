@@ -64,7 +64,25 @@ class PiServerConnector(Connector):
     ) -> pd.DataFrame:
         """ดึง interpolated values หลาย tag เป็น DataFrame (คอลัมน์ = tag)."""
         data = self._post(self._payload(tags, start, end, interval))
+        self._last_meta = self._extract_meta(data)
         return self._to_dataframe(data)
+
+    _last_meta: dict = {}
+
+    @staticmethod
+    def _extract_meta(payload: dict) -> dict:
+        """ดึง description + unit ของแต่ละ tag จาก response (จุดแรกที่มีค่า)."""
+        results = (payload or {}).get("results") or {}
+        meta: dict = {}
+        for tag, points in results.items():
+            desc, unit = "", ""
+            for p in points or []:
+                desc = p.get("description") or desc
+                unit = p.get("unit") or unit
+                if desc or unit:
+                    break
+            meta[tag] = {"description": desc, "unit": unit}
+        return meta
 
     @staticmethod
     def _to_dataframe(payload: dict) -> pd.DataFrame:

@@ -56,20 +56,23 @@ def _to_columnar(df: pd.DataFrame) -> dict:
 
 @router.post("")
 def get_data(req: DataRequest):
+    tag_meta: dict = {}
     try:
         if req.source == "pi":
             if not req.tags:
                 raise ValueError("source=pi ต้องระบุ tags")
-            df = _pi_connector().fetch(req.tags, req.start, req.end, req.interval)
+            conn = _pi_connector()
+            df = conn.fetch(req.tags, req.start, req.end, req.interval)
+            tag_meta = getattr(conn, "_last_meta", {}) or {}
         elif req.source == "sql":
             if not req.sql:
                 raise ValueError("source=sql ต้องระบุ sql config")
             s = req.sql
-            conn = SqlServerConnector(
+            sql_conn = SqlServerConnector(
                 host=s.host, user=s.user, password=s.password,
                 database=s.database, port=s.port,
             )
-            df = conn.fetch_timeseries(
+            df = sql_conn.fetch_timeseries(
                 s.database, s.table, s.timeColumn, s.valueColumn, req.start, req.end
             )
             df = df.rename(columns={"value": s.valueColumn})
@@ -77,7 +80,11 @@ def get_data(req: DataRequest):
             raise ValueError(f"source ไม่รองรับ: {req.source}")
 
         out = _to_columnar(df)
-        out["meta"] = {"source": req.source, "rows": len(out["timestamps"])}
+        out["meta"] = {
+            "source": req.source,
+            "rows": len(out["timestamps"]),
+            "descriptions": tag_meta,
+        }
         return out
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc))

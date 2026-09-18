@@ -23,11 +23,17 @@ function formatTooltipTime(iso: string): string {
 export default function ChartCanvas({
   data,
   interval = "1h",
+  descriptions = {},
 }: {
   data: ChartData;
   interval?: string;
+  descriptions?: Record<string, string>;
 }) {
   const seriesNames = Object.keys(data.series);
+  const label = (name: string) => descriptions[name] || name;
+
+  // โชว์ป้ายเวลาแค่ ~8 ป้าย ไม่ว่าจะมีกี่จุด (ลดความถี่แกน X)
+  const labelStep = Math.max(0, Math.ceil(data.timestamps.length / 8) - 1);
 
   const option = {
     backgroundColor: "transparent",
@@ -51,8 +57,11 @@ export default function ChartCanvas({
       },
     },
     legend: {
-      data: seriesNames,
+      data: seriesNames.map(label),
       top: 0,
+      icon: "line",
+      itemWidth: 18,
+      itemHeight: 2,
       textStyle: { color: "#a3a3a3", fontSize: 10 },
     },
     grid: { left: 50, right: 20, top: 30, bottom: 30 },
@@ -63,6 +72,8 @@ export default function ChartCanvas({
       axisLabel: {
         fontSize: 10,
         color: "#737373",
+        interval: labelStep,
+        hideOverlap: true,
         formatter: (value: string) => formatAxisTime(value, interval),
       },
       axisLine: { lineStyle: { color: "#333" } },
@@ -79,7 +90,7 @@ export default function ChartCanvas({
     },
     dataZoom: [{ type: "inside", start: 0, end: 100 }],
     series: seriesNames.map((name) => ({
-      name,
+      name: label(name),
       type: "line",
       data: data.series[name],
       showSymbol: false,
