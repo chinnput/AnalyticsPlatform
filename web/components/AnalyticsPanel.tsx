@@ -7,6 +7,7 @@ import CorrelationHeatmap, {
 } from "@/components/CorrelationHeatmap";
 import SdBandCanvas, { SdData } from "@/components/SdBandCanvas";
 import KdeCanvas, { KdeData } from "@/components/KdeCanvas";
+import HistogramCanvas, { HistogramData } from "@/components/HistogramCanvas";
 import ClusterCanvas, { ClusterData } from "@/components/ClusterCanvas";
 
 export type AnalysisKind =
@@ -15,6 +16,7 @@ export type AnalysisKind =
   | "correlation"
   | "sd"
   | "kde"
+  | "histogram"
   | "clustering";
 
 export const ANALYSIS_TOOLS: { key: AnalysisKind; label: string }[] = [
@@ -23,11 +25,12 @@ export const ANALYSIS_TOOLS: { key: AnalysisKind; label: string }[] = [
   { key: "correlation", label: "Correlation" },
   { key: "sd", label: "SD Band" },
   { key: "kde", label: "KDE" },
+  { key: "histogram", label: "Histogram" },
   { key: "clustering", label: "Clustering" },
 ];
 
 // analysis ที่โฟกัส tag เดี่ยว (เลือกได้ 1 tag)
-const SINGLE_TAG: AnalysisKind[] = ["sd", "kde"];
+const SINGLE_TAG: AnalysisKind[] = ["sd", "kde", "histogram"];
 // analysis ที่ต้องมีอย่างน้อย 2 tag
 const MULTI_MIN2: AnalysisKind[] = ["correlation", "clustering"];
 
@@ -314,6 +317,13 @@ function ResultView({
     const d = result as KdeData;
     if (!d?.curves?.length) return <Empty />;
     return <KdeCanvas data={d} descriptions={descriptions} height="100%" />;
+  }
+  if (type === "histogram") {
+    const d = result as HistogramData;
+    if (!d?.series?.length) return <Empty />;
+    return (
+      <HistogramCanvas data={d} descriptions={descriptions} height="100%" />
+    );
   }
   if (type === "clustering") {
     const d = result as ClusterData;

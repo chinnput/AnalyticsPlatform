@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from app.analysis.boxplot import boxplot
 from app.analysis.clustering import clustering
 from app.analysis.correlation import correlation
+from app.analysis.histogram import histogram
 from app.analysis.kde import kde
 from app.analysis.sd import sd_band
 from app.analysis.summary import summarize
@@ -80,6 +81,8 @@ def analyze(req: AnalyzeRequest):
             return {"type": "sd", "result": sd_band(df)}
         if req.type == "kde":
             return {"type": "kde", "result": kde(df)}
+        if req.type == "histogram":
+            return {"type": "histogram", "result": histogram(df)}
         if req.type == "clustering":
             return {"type": "clustering", "result": clustering(df)}
         raise ValueError(f"analysis type ไม่รองรับ: {req.type}")
