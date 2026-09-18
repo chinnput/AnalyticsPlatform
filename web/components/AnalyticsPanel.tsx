@@ -68,11 +68,14 @@ export default function AnalyticsPanel({
 }) {
   const [type, setType] = useState<AnalysisKind>("sd");
   const [tags, setTags] = useState<string[]>([]);
+  const [xTags, setXTags] = useState<string[]>([]);
+  const [yTags, setYTags] = useState<string[]>([]);
   const [result, setResult] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
   const single = SINGLE_TAG.includes(type);
+  const isCorr = type === "correlation";
   const label = (t: string) => descriptions[t] || t;
 
   function changeType(next: AnalysisKind) {
@@ -97,12 +100,17 @@ export default function AnalyticsPanel({
 
   const run = useRef<() => void>(() => {});
   run.current = async () => {
-    if (tags.length === 0) {
+    if (isCorr) {
+      if (xTags.length === 0 || yTags.length === 0) {
+        setResult(null);
+        setMsg(xTags.length || yTags.length ? "เลือก tag ทั้งแกน X และ Y" : "");
+        return;
+      }
+    } else if (tags.length === 0) {
       setResult(null);
       setMsg("");
       return;
-    }
-    if (MULTI_MIN2.includes(type) && tags.length < 2) {
+    } else if (MULTI_MIN2.includes(type) && tags.length < 2) {
       setMsg("ต้องเลือกอย่างน้อย 2 tags");
       return;
     }
@@ -120,7 +128,7 @@ export default function AnalyticsPanel({
         body: JSON.stringify({
           type,
           source: "pi",
-          tags,
+          ...(isCorr ? { xTags, yTags } : { tags }),
           start: range.start,
           end: range.end,
           interval,
@@ -145,7 +153,7 @@ export default function AnalyticsPanel({
   useEffect(() => {
     run.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, tags, interval]);
+  }, [type, tags, xTags, yTags, interval]);
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded border border-neutral-800 bg-neutral-950">
@@ -162,13 +170,42 @@ export default function AnalyticsPanel({
             </option>
           ))}
         </select>
-        <TagPicker
-          saved={saved}
-          selected={tags}
-          single={single}
-          onToggle={toggleTag}
-          label={label}
-        />
+        {isCorr ? (
+          <>
+            <span className="text-[10px] text-neutral-500">X</span>
+            <TagPicker
+              saved={saved}
+              selected={xTags}
+              single={false}
+              onToggle={(t) =>
+                setXTags((p) =>
+                  p.includes(t) ? p.filter((x) => x !== t) : [...p, t],
+                )
+              }
+              label={label}
+            />
+            <span className="text-[10px] text-neutral-500">Y</span>
+            <TagPicker
+              saved={saved}
+              selected={yTags}
+              single={false}
+              onToggle={(t) =>
+                setYTags((p) =>
+                  p.includes(t) ? p.filter((y) => y !== t) : [...p, t],
+                )
+              }
+              label={label}
+            />
+          </>
+        ) : (
+          <TagPicker
+            saved={saved}
+            selected={tags}
+            single={single}
+            onToggle={toggleTag}
+            label={label}
+          />
+        )}
         {busy && <span className="ml-auto text-[10px] text-neutral-500">…</span>}
       </div>
 
@@ -305,8 +342,14 @@ function ResultView({
   }
   if (type === "correlation") {
     const d = result as CorrelationData;
-    if (!d?.tags?.length) return <Empty />;
-    return <CorrelationHeatmap data={d} height="100%" />;
+    if (!d?.matrix?.length) return <Empty />;
+    return (
+      <CorrelationHeatmap
+        data={d}
+        height="100%"
+        label={(t) => descriptions[t] || t}
+      />
+    );
   }
   if (type === "sd") {
     const d = result as SdData;

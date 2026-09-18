@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ChartCanvas, { ChartData } from "@/components/ChartCanvas";
+import ChartCanvas, {
+  ChartData,
+  DrawMode,
+  Annotation,
+} from "@/components/ChartCanvas";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
 
 type RangePreset = "1D" | "1W" | "1M" | "custom";
@@ -76,6 +80,18 @@ export default function ChartPage() {
   const [groups, setGroups] = useState<string[]>([]);
   const [rightOpen, setRightOpen] = useState(true);
   const [rightWidth, setRightWidth] = useState(256);
+  const [iqrOn, setIqrOn] = useState(false);
+  const iqrK = 1.5; // ค่ามาตรฐาน IQR (auto)
+  const [iqrSuggest, setIqrSuggest] = useState<
+    { tag: string; total: number; outliers: number }[] | null
+  >(null);
+  const [scaleMode, setScaleMode] = useState<"single" | "multiple" | "range">(
+    "multiple",
+  );
+  const [scaleMin, setScaleMin] = useState("");
+  const [scaleMax, setScaleMax] = useState("");
+  const [drawMode, setDrawMode] = useState<DrawMode>("none");
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
   useEffect(() => {
     loadSaved();
@@ -193,6 +209,30 @@ export default function ChartPage() {
     await refreshChart();
   }
 
+  // เรียก /filter/suggest เพื่อดูจำนวน outlier ที่จะถูกตัดต่อ tag (ไม่แก้ข้อมูล)
+  async function suggestFilter(k: number) {
+    const range = resolveRange();
+    if (activeTags.length === 0 || !range) return;
+    try {
+      const res = await fetch("/api/filter/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "pi",
+          tags: activeTags,
+          start: range.start,
+          end: range.end,
+          interval,
+          k,
+        }),
+      });
+      const json = await res.json();
+      if (res.ok) setIqrSuggest(json.tags ?? null);
+    } catch {
+      /* ignore */
+    }
+  }
+
   // ดึงข้อมูลใหม่ตาม activeTags ปัจจุบัน (ไม่ toggle) ใช้กับปุ่ม refresh
   async function refreshChart() {
     const tags = activeTags;
@@ -220,7 +260,14 @@ export default function ChartPage() {
       const res = await fetch("/api/data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: "pi", tags, start, end, interval }),
+        body: JSON.stringify({
+          source: "pi",
+          tags,
+          start,
+          end,
+          interval,
+          iqr: { enabled: iqrOn, k: iqrK },
+        }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -234,7 +281,11 @@ export default function ChartPage() {
           descMap[tag] = (info as { description?: string })?.description ?? "";
         }
         setDescriptions(descMap);
-        setMessage(`${json.meta?.rows ?? 0} points`);
+        const removed = json.meta?.outliersRemoved ?? 0;
+        setMessage(
+          `${json.meta?.rows ?? 0} points` +
+            (removed > 0 ? ` · ${removed} outliers removed` : ""),
+        );
         setVisible((v) => ({ ...v, chart: true }));
       }
     } catch {
@@ -243,6 +294,25 @@ export default function ChartPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // วางเส้นใหม่จากการคลิกบนกราฟ (แก้ข้อความ label ทีหลังที่ chip ด้านล่าง)
+  function placeAnnotation(a: { kind: "hline" | "vline"; value: number }) {
+    setAnnotations((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), kind: a.kind, value: a.value },
+    ]);
+    setDrawMode("none");
+  }
+
+  function removeAnnotation(id: string) {
+    setAnnotations((prev) => prev.filter((x) => x.id !== id));
+  }
+
+  function setAnnotationText(id: string, text: string) {
+    setAnnotations((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, text: text || undefined } : x)),
+    );
   }
 
   function resolveRange(): { start: string; end: string } | null {
@@ -319,6 +389,54 @@ export default function ChartPage() {
               <option value="1d">1d</option>
             </select>
           </div>
+          {mode === "chart" && visible.chart && (
+            <button
+              onClick={refreshChart}
+              disabled={busy}
+              title="Refresh chart with current tags"
+              className="rounded bg-neutral-800 px-2 py-1 text-[11px] leading-none text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
+            >
+              ↻ Refresh
+            </button>
+          )}
+          {mode === "chart" && (
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Scale
+              </span>
+              <select
+                className="input"
+                value={scaleMode}
+                onChange={(e) =>
+                  setScaleMode(
+                    e.target.value as "single" | "multiple" | "range",
+                  )
+                }
+              >
+                <option value="multiple">Multiple</option>
+                <option value="single">Single</option>
+                <option value="range">Range</option>
+              </select>
+              {scaleMode === "range" && (
+                <>
+                  <input
+                    className="input w-16"
+                    type="number"
+                    value={scaleMin}
+                    onChange={(e) => setScaleMin(e.target.value)}
+                    placeholder="min"
+                  />
+                  <input
+                    className="input w-16"
+                    type="number"
+                    value={scaleMax}
+                    onChange={(e) => setScaleMax(e.target.value)}
+                    placeholder="max"
+                  />
+                </>
+              )}
+            </div>
+          )}
           {message && (
             <span className="ml-auto text-[10px] text-neutral-500">
               {message}
@@ -376,19 +494,183 @@ export default function ChartPage() {
                 </div>
               </div>
             )}
+
+            {mode === "chart" && visible.chart && data && data.timestamps.length > 0 && (
+              <div className="border-t border-neutral-800 pt-2">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-500">
+                  Draw
+                </div>
+                <div className="flex flex-col gap-1">
+                  <button
+                    onClick={() =>
+                      setDrawMode((m) => (m === "hline" ? "none" : "hline"))
+                    }
+                    className={`w-full rounded px-2 py-1 text-[13px] leading-none ${
+                      drawMode === "hline"
+                        ? "bg-amber-600 text-white"
+                        : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                    }`}
+                    title="เส้นแนวนอน: คลิกบนกราฟเพื่อวาง"
+                  >
+                    —
+                  </button>
+                  <button
+                    onClick={() =>
+                      setDrawMode((m) => (m === "vline" ? "none" : "vline"))
+                    }
+                    className={`w-full rounded px-2 py-1 text-[13px] leading-none ${
+                      drawMode === "vline"
+                        ? "bg-amber-600 text-white"
+                        : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                    }`}
+                    title="เส้นแนวตั้ง: คลิกบนกราฟเพื่อวาง"
+                  >
+                    |
+                  </button>
+                  {annotations.length > 0 && (
+                    <button
+                      onClick={() => setAnnotations([])}
+                      className="w-full rounded bg-neutral-800 px-2 py-1 text-[10px] text-neutral-300 hover:bg-red-700 hover:text-white"
+                      title="ล้างเส้นทั้งหมด"
+                    >
+                      Clear ({annotations.length})
+                    </button>
+                  )}
+                </div>
+                {drawMode !== "none" && (
+                  <div className="mt-1 text-[10px] text-amber-400">
+                    คลิกบนกราฟเพื่อวางเส้น
+                  </div>
+                )}
+              </div>
+            )}
           </aside>
 
           {/* CENTER: chart mode หรือ analytics mode */}
           {mode === "chart" ? (
             <section className="flex-1 overflow-y-auto p-3">
               {visible.chart && data && data.timestamps.length > 0 ? (
-                <div className="rounded border border-neutral-800 bg-neutral-950 p-2">
-                  <ChartCanvas
-                    data={data}
-                    interval={interval}
-                    descriptions={descriptions}
-                  />
-                </div>
+                <>
+                  <div className="rounded border border-neutral-800 bg-neutral-950 p-2">
+                    <ChartCanvas
+                      data={data}
+                      interval={interval}
+                      descriptions={descriptions}
+                      scaleMode={scaleMode}
+                      scaleMin={scaleMin === "" ? undefined : Number(scaleMin)}
+                      scaleMax={scaleMax === "" ? undefined : Number(scaleMax)}
+                      drawMode={drawMode}
+                      annotations={annotations}
+                      onPlaceAnnotation={placeAnnotation}
+                    />
+                  </div>
+                  {annotations.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {annotations.map((a) => (
+                        <span
+                          key={a.id}
+                          className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-1.5 py-0.5 text-[10px] text-neutral-300"
+                        >
+                          <span className="text-amber-400">
+                            {a.kind === "hline" ? "—" : "|"}
+                          </span>
+                          {a.kind === "hline"
+                            ? a.value.toFixed(2)
+                            : data.timestamps[a.value]
+                              ? new Date(
+                                  data.timestamps[a.value],
+                                ).toLocaleString()
+                              : `#${a.value}`}
+                          <input
+                            value={a.text || ""}
+                            onChange={(e) =>
+                              setAnnotationText(a.id, e.target.value)
+                            }
+                            placeholder="label"
+                            className="w-20 rounded border border-neutral-700 bg-black px-1 text-[10px] text-neutral-200"
+                          />
+                          <button
+                            onClick={() => removeAnnotation(a.id)}
+                            className="text-neutral-500 hover:text-red-400"
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {Object.keys(data.series).length > 0 && (
+                    <div className="mt-3">
+                      <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-500">
+                        Summary
+                      </div>
+                      <div className="overflow-x-auto rounded border border-neutral-800 bg-neutral-950">
+                        <table className="w-full text-[11px]">
+                          <thead>
+                            <tr className="text-neutral-500">
+                              <th className="px-2 py-1 text-left font-medium">
+                                Tag
+                              </th>
+                              {(
+                                [
+                                  "count",
+                                  "min",
+                                  "max",
+                                  "mean",
+                                  "median",
+                                  "std",
+                                ] as const
+                              ).map((m) => (
+                                <th
+                                  key={m}
+                                  className="px-2 py-1 text-right font-medium capitalize"
+                                >
+                                  {m}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(data.series).map(([tag, vals]) => {
+                              const s = computeStats(vals);
+                              return (
+                                <tr
+                                  key={tag}
+                                  className="border-t border-neutral-800/60 text-neutral-300"
+                                >
+                                  <td
+                                    className="max-w-[220px] truncate px-2 py-0.5 font-medium text-neutral-200"
+                                    title={descriptions[tag] || tag}
+                                  >
+                                    {descriptions[tag] || tag}
+                                  </td>
+                                  <td className="px-2 py-0.5 text-right tabular-nums">
+                                    {s.count}
+                                  </td>
+                                  <td className="px-2 py-0.5 text-right tabular-nums">
+                                    {fmtNum(s.min)}
+                                  </td>
+                                  <td className="px-2 py-0.5 text-right tabular-nums">
+                                    {fmtNum(s.max)}
+                                  </td>
+                                  <td className="px-2 py-0.5 text-right tabular-nums">
+                                    {fmtNum(s.mean)}
+                                  </td>
+                                  <td className="px-2 py-0.5 text-right tabular-nums">
+                                    {fmtNum(s.median)}
+                                  </td>
+                                  <td className="px-2 py-0.5 text-right tabular-nums">
+                                    {fmtNum(s.std)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="flex h-64 items-center justify-center rounded border border-dashed border-neutral-800 text-[11px] text-neutral-600">
                   Add tags on the right, then click Chart
@@ -464,16 +746,6 @@ export default function ChartPage() {
               <div>
                 <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-neutral-500">
                   <span>On Chart</span>
-                  {visible.chart && (
-                    <button
-                      onClick={refreshChart}
-                      disabled={busy}
-                      title="Refresh chart with current tags"
-                      className="text-neutral-500 hover:text-blue-400 disabled:opacity-50"
-                    >
-                      ↻
-                    </button>
-                  )}
                 </div>
                 <div className="flex flex-col gap-1">
                   {activeTags.map((tag) => (
@@ -605,56 +877,50 @@ export default function ChartPage() {
               ))}
             </div>
 
-            {data && Object.keys(data.series).length > 0 && (
+            {activeTags.length > 0 && (
               <div className="border-t border-neutral-800 pt-3">
-                <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-500">
-                  Summary
+                <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-neutral-500">
+                  <span>Outlier Filter (IQR)</span>
+                  <label className="flex cursor-pointer items-center gap-1 normal-case">
+                    <input
+                      type="checkbox"
+                      checked={iqrOn}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setIqrOn(on);
+                        if (on) suggestFilter(iqrK);
+                        else setIqrSuggest(null);
+                      }}
+                    />
+                    <span className="text-[10px] text-neutral-400">
+                      {iqrOn ? "On" : "Off"}
+                    </span>
+                  </label>
                 </div>
-                <div className="overflow-x-auto rounded border border-neutral-800 bg-neutral-900">
-                  <table className="w-full text-[10px]">
-                    <thead>
-                      <tr className="text-neutral-500">
-                        <th className="px-1.5 py-1 text-left font-medium"></th>
-                        {Object.keys(data.series).map((tag) => (
-                          <th
-                            key={tag}
-                            className="max-w-[70px] truncate px-1.5 py-1 text-right font-medium text-neutral-300"
-                            title={descriptions[tag] || tag}
-                          >
-                            {descriptions[tag] || tag}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(
-                        ["count", "min", "max", "mean", "median", "std"] as const
-                      ).map((metric) => (
-                        <tr
-                          key={metric}
-                          className="border-t border-neutral-800/60 text-neutral-400"
-                        >
-                          <td className="px-1.5 py-0.5 font-medium capitalize text-neutral-500">
-                            {metric}
-                          </td>
-                          {Object.values(data.series).map((vals, i) => {
-                            const s = computeStats(vals);
-                            return (
-                              <td
-                                key={i}
-                                className="px-1.5 py-0.5 text-right tabular-nums"
-                              >
-                                {metric === "count"
-                                  ? s.count
-                                  : fmtNum(s[metric])}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                {iqrOn && (
+                  <div className="rounded border border-neutral-800 bg-neutral-900 p-2">
+                    {iqrSuggest && (
+                      <div className="text-[10px] text-neutral-400">
+                        จะตัด{" "}
+                        <span className="font-semibold text-amber-400">
+                          {iqrSuggest.reduce((a, t) => a + t.outliers, 0)}
+                        </span>{" "}
+                        จุด จาก{" "}
+                        {iqrSuggest.reduce((a, t) => a + t.total, 0)} จุด
+                      </div>
+                    )}
+                    <button
+                      onClick={refreshChart}
+                      disabled={busy}
+                      className="mt-2 w-full rounded bg-blue-600 py-1 text-[10px] font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+                    >
+                      Apply
+                    </button>
+                    <p className="mt-1 text-[9px] leading-tight text-neutral-600">
+                      ตัดค่าผิดปกติอัตโนมัติ (IQR, k=1.5)
+                    </p>
+                  </div>
+                )}
               </div>
             )}
             </aside>

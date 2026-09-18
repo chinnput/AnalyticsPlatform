@@ -13,6 +13,7 @@ from app.analysis.sd import sd_band
 from app.analysis.summary import summarize
 from app.connectors.pi_server import PiServerConnector
 from app.connectors.sql_server import SqlServerConnector
+from app.pipeline.filter import apply_iqr
 
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
@@ -28,6 +29,11 @@ class SqlSource(BaseModel):
     port: int = 1433
 
 
+class IqrFilter(BaseModel):
+    enabled: bool = False
+    k: float = 1.5
+
+
 class AnalyzeRequest(BaseModel):
     type: str  # "summary" (more types added later)
     source: str  # "pi" | "sql"
@@ -35,7 +41,10 @@ class AnalyzeRequest(BaseModel):
     end: str
     interval: str = "1h"
     tags: list[str] | None = None
+    xTags: list[str] | None = None  # correlation: แกน X
+    yTags: list[str] | None = None  # correlation: แกน Y
     sql: SqlSource | None = None
+    iqr: IqrFilter | None = None
 
 
 def _pi_connector() -> PiServerConnector:
@@ -49,9 +58,13 @@ def _pi_connector() -> PiServerConnector:
 
 def _fetch(req: AnalyzeRequest) -> pd.DataFrame:
     if req.source == "pi":
-        if not req.tags:
+        tags = req.tags
+        if req.xTags or req.yTags:
+            merged = list(dict.fromkeys((req.xTags or []) + (req.yTags or [])))
+            tags = merged or tags
+        if not tags:
             raise ValueError("source=pi ต้องระบุ tags")
-        return _pi_connector().fetch(req.tags, req.start, req.end, req.interval)
+        return _pi_connector().fetch(tags, req.start, req.end, req.interval)
     if req.source == "sql":
         if not req.sql:
             raise ValueError("source=sql ต้องระบุ sql config")
@@ -71,12 +84,17 @@ def _fetch(req: AnalyzeRequest) -> pd.DataFrame:
 def analyze(req: AnalyzeRequest):
     try:
         df = _fetch(req)
+        if req.iqr and req.iqr.enabled:
+            df = apply_iqr(df, req.iqr.k)
         if req.type == "summary":
             return {"type": "summary", "result": summarize(df)}
         if req.type == "boxplot":
             return {"type": "boxplot", "result": boxplot(df)}
         if req.type == "correlation":
-            return {"type": "correlation", "result": correlation(df)}
+            return {
+                "type": "correlation",
+                "result": correlation(df, req.xTags, req.yTags),
+            }
         if req.type == "sd":
             return {"type": "sd", "result": sd_band(df)}
         if req.type == "kde":

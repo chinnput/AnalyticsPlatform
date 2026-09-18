@@ -1,10 +1,21 @@
 "use client";
 
+import { useRef, useEffect } from "react";
 import ReactECharts from "echarts-for-react";
+import type EChartsReactCore from "echarts-for-react/lib/core";
 
 export interface ChartData {
   timestamps: string[];
   series: Record<string, (number | null)[]>;
+}
+
+export type DrawMode = "none" | "hline" | "vline";
+
+export interface Annotation {
+  id: string;
+  kind: "hline" | "vline";
+  value: number; // hline = ค่า Y, vline = index ของแกน X
+  text?: string;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -20,20 +31,93 @@ function formatTooltipTime(iso: string): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+export type ScaleMode = "single" | "multiple" | "range";
+
+const AXIS_COLORS = [
+  "#60a5fa",
+  "#f472b6",
+  "#4ade80",
+  "#fbbf24",
+  "#a78bfa",
+  "#22d3ee",
+];
+
+// ค่าล่าสุดที่ไม่ใช่ null ของ series
+function lastValue(vals: (number | null)[]): number | null {
+  for (let i = vals.length - 1; i >= 0; i--) {
+    const v = vals[i];
+    if (v != null && !Number.isNaN(v)) return v;
+  }
+  return null;
+}
+
 export default function ChartCanvas({
   data,
   interval = "1h",
   descriptions = {},
+  scaleMode = "multiple",
+  scaleMin,
+  scaleMax,
+  drawMode = "none",
+  annotations = [],
+  onPlaceAnnotation,
 }: {
   data: ChartData;
   interval?: string;
   descriptions?: Record<string, string>;
+  scaleMode?: ScaleMode;
+  scaleMin?: number;
+  scaleMax?: number;
+  drawMode?: DrawMode;
+  annotations?: Annotation[];
+  onPlaceAnnotation?: (a: { kind: "hline" | "vline"; value: number }) => void;
 }) {
+  const chartRef = useRef<EChartsReactCore>(null);
+  // ใช้ ref เก็บ drawMode + callback ล่าสุด กัน closure ของ zr click ค้างค่าเก่า
+  const drawModeRef = useRef(drawMode);
+  const placeRef = useRef(onPlaceAnnotation);
+  useEffect(() => {
+    drawModeRef.current = drawMode;
+    placeRef.current = onPlaceAnnotation;
+  }, [drawMode, onPlaceAnnotation]);
+
   const seriesNames = Object.keys(data.series);
   const label = (name: string) => descriptions[name] || name;
 
   // โชว์ป้ายเวลาแค่ ~8 ป้าย ไม่ว่าจะมีกี่จุด (ลดความถี่แกน X)
   const labelStep = Math.max(0, Math.ceil(data.timestamps.length / 8) - 1);
+
+  // multiple = แกน Y แยกทุก tag, single/range = แกนเดียว
+  const multi = scaleMode === "multiple" && seriesNames.length > 1;
+
+  const baseYAxis = (offset = 0, color?: string) => ({
+    type: "value" as const,
+    scale: scaleMode !== "range",
+    min: scaleMode === "range" ? scaleMin : undefined,
+    max: scaleMode === "range" ? scaleMax : undefined,
+    position: offset % 2 === 0 ? ("left" as const) : ("right" as const),
+    offset: Math.floor(offset / 2) * 42,
+    axisLabel: {
+      fontSize: 10,
+      color: color ?? "#737373",
+      formatter: (value: number) => value.toFixed(2),
+    },
+    axisLine: color ? { show: true, lineStyle: { color } } : undefined,
+    splitLine:
+      offset === 0
+        ? { lineStyle: { color: "#ffffff", opacity: 0.07 } }
+        : { show: false },
+  });
+
+  const yAxis = multi
+    ? seriesNames.map((_, i) => baseYAxis(i, AXIS_COLORS[i % AXIS_COLORS.length]))
+    : baseYAxis(0);
+
+  // เว้นระยะซ้าย/ขวาให้พอกับจำนวนแกนเมื่อเป็น multiple
+  const leftAxes = multi ? Math.ceil(seriesNames.length / 2) : 1;
+  const rightAxes = multi ? Math.floor(seriesNames.length / 2) : 0;
+  const gridLeft = 50 + Math.max(0, leftAxes - 1) * 42;
+  const gridRight = 20 + rightAxes * 42;
 
   const option = {
     backgroundColor: "transparent",
@@ -64,7 +148,7 @@ export default function ChartCanvas({
       itemHeight: 2,
       textStyle: { color: "#a3a3a3", fontSize: 10 },
     },
-    grid: { left: 50, right: 20, top: 30, bottom: 30 },
+    grid: { left: gridLeft, right: gridRight, top: 30, bottom: 30 },
     xAxis: {
       type: "category",
       data: data.timestamps,
@@ -78,32 +162,110 @@ export default function ChartCanvas({
       },
       axisLine: { lineStyle: { color: "#333" } },
     },
-    yAxis: {
-      type: "value",
-      scale: true,
-      axisLabel: {
-        fontSize: 10,
-        color: "#737373",
-        formatter: (value: number) => value.toFixed(2),
-      },
-      splitLine: { lineStyle: { color: "#ffffff", opacity: 0.07 } },
-    },
-    dataZoom: [{ type: "inside", start: 0, end: 100 }],
-    series: seriesNames.map((name) => ({
-      name: label(name),
-      type: "line",
-      data: data.series[name],
-      showSymbol: false,
-      connectNulls: false,
-      lineStyle: { width: 1.5 },
-    })),
+    yAxis,
+    // ปิด zoom ตอนวาด ไม่งั้นคลิกแล้วซูมแทน
+    dataZoom: [{ type: "inside", start: 0, end: 100, disabled: drawMode !== "none" }],
+    series: seriesNames.map((name, i) => {
+      const color =
+        seriesNames.length > 1
+          ? AXIS_COLORS[i % AXIS_COLORS.length]
+          : "#60a5fa";
+      const lastVal = lastValue(data.series[name]);
+
+      // markLine ต่อ series: ค่าล่าสุด (label ติดแกน Y) + annotations (เฉพาะ series แรก)
+      const mlData: Record<string, unknown>[] = [];
+      if (lastVal != null) {
+        mlData.push({
+          yAxis: lastVal,
+          _last: true,
+          lineStyle: { color, width: 1, type: "solid", opacity: 0.5 },
+          label: {
+            show: true,
+            position: "start",
+            color: "#000",
+            backgroundColor: color,
+            padding: [2, 4, 2, 4],
+            borderRadius: 2,
+            formatter: () => Number(lastVal).toFixed(2),
+          },
+        });
+      }
+      if (i === 0) {
+        for (const a of annotations) {
+          mlData.push(
+            a.kind === "hline"
+              ? { yAxis: a.value, annText: a.text, name: a.id }
+              : { xAxis: a.value, annText: a.text, name: a.id },
+          );
+        }
+      }
+      const markLine =
+        mlData.length > 0
+          ? {
+              silent: true,
+              symbol: "none",
+              label: {
+                position: "middle",
+                fontSize: 10,
+                color: "#e5e5e5",
+                formatter: (p: { data: { annText?: string } }) =>
+                  p.data.annText || "",
+              },
+              lineStyle: { color: "#f59e0b", width: 1, type: "dashed" },
+              data: mlData,
+            }
+          : undefined;
+      return {
+        name: label(name),
+        type: "line",
+        yAxisIndex: multi ? i : 0,
+        data: data.series[name],
+        showSymbol: false,
+        connectNulls: false,
+        lineStyle: { width: 1.5, color },
+        itemStyle: { color },
+        ...(markLine ? { markLine } : {}),
+      };
+    }),
   };
+
+  // คลิกที่ไหนก็ได้บนพื้นที่กราฟ แล้วแปลง pixel -> ค่าข้อมูลเพื่อวางเส้น
+  function handleZrClick(e: { offsetX: number; offsetY: number }) {
+    const mode = drawModeRef.current;
+    const place = placeRef.current;
+    if (mode === "none" || !place) return;
+    const inst = chartRef.current?.getEchartsInstance();
+    if (!inst) return;
+    const pt: [number, number] = [e.offsetX, e.offsetY];
+    if (!inst.containPixel("grid", pt)) return;
+    const [xIdx, yVal] = inst.convertFromPixel({ gridIndex: 0 }, pt) as [
+      number,
+      number,
+    ];
+    if (mode === "hline") {
+      place({ kind: "hline", value: Number(yVal.toFixed(4)) });
+    } else if (mode === "vline") {
+      place({ kind: "vline", value: Math.round(xIdx) });
+    }
+  }
 
   return (
     <ReactECharts
+      ref={chartRef}
       option={option}
-      style={{ height: 460, width: "100%" }}
+      style={{
+        height: 460,
+        width: "100%",
+        cursor: drawMode === "none" ? "default" : "crosshair",
+      }}
       notMerge
+      onChartReady={(inst: {
+        getZr: () => { on: (ev: string, cb: (e: unknown) => void) => void };
+      }) => {
+        inst.getZr().on("click", (ev) =>
+          handleZrClick(ev as { offsetX: number; offsetY: number }),
+        );
+      }}
     />
   );
 }

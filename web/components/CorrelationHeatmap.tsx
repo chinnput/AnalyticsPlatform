@@ -3,17 +3,30 @@
 import ReactECharts from "echarts-for-react";
 
 export interface CorrelationData {
-  tags: string[];
+  tags?: string[];
+  xTags?: string[];
+  yTags?: string[];
   matrix: (number | null)[][];
 }
 
 export default function CorrelationHeatmap({
   data,
   height = 360,
+  label,
 }: {
   data: CorrelationData;
   height?: number | string;
+  label?: (t: string) => string;
 }) {
+  const xTags = data.xTags ?? data.tags ?? [];
+  const yTags = data.yTags ?? data.tags ?? [];
+  const fmt = (t: string) => (label ? label(t) : t);
+  // ตัดชื่อยาวบนแกน เก็บ 22 ตัวท้าย (ชื่อเต็มดูใน tooltip)
+  const short = (t: string) => {
+    const s = fmt(t);
+    return s.length > 22 ? "…" + s.slice(-21) : s;
+  };
+
   const points: [number, number, number | string][] = [];
   data.matrix.forEach((row, y) => {
     row.forEach((v, x) => {
@@ -31,20 +44,29 @@ export default function CorrelationHeatmap({
       textStyle: { color: "#e5e5e5", fontSize: 10 },
       formatter: (p: { data: [number, number, number | string] }) => {
         const [x, y, v] = p.data;
-        return `${data.tags[y]} × ${data.tags[x]}<br/>r = ${v}`;
+        return `${fmt(yTags[y])} × ${fmt(xTags[x])}<br/>r = ${v}`;
       },
     },
     grid: { left: 120, right: 20, top: 20, bottom: 100 },
     xAxis: {
       type: "category",
-      data: data.tags,
-      axisLabel: { fontSize: 10, color: "#737373", rotate: 45 },
+      data: xTags,
+      axisLabel: {
+        fontSize: 10,
+        color: "#737373",
+        rotate: 45,
+        formatter: (t: string) => short(t),
+      },
       splitArea: { show: true },
     },
     yAxis: {
       type: "category",
-      data: data.tags,
-      axisLabel: { fontSize: 10, color: "#737373" },
+      data: yTags,
+      axisLabel: {
+        fontSize: 10,
+        color: "#737373",
+        formatter: (t: string) => short(t),
+      },
       splitArea: { show: true },
     },
     visualMap: {
