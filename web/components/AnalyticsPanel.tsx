@@ -33,6 +33,13 @@ export const ANALYSIS_TOOLS: { key: AnalysisKind; label: string }[] = [
 const SINGLE_TAG: AnalysisKind[] = ["sd", "kde", "histogram"];
 // analysis ที่ต้องมีอย่างน้อย 2 tag
 const MULTI_MIN2: AnalysisKind[] = ["correlation", "clustering"];
+// histogram "Class by": แบ่งตาม Digester Rule v1 (docs/digester-rule.md)
+const DIGESTER_CLASS = "__digester__";
+
+interface DigesterQuality {
+  points: number;
+  byDigester: Record<string, number>; // D0 = ไม่มีหม้อยืนยัน, NaN = ซ้อนกัน
+}
 
 export interface SummaryRow {
   tag: string;
@@ -70,6 +77,7 @@ export default function AnalyticsPanel({
   const [tags, setTags] = useState<string[]>([]);
   const [xTags, setXTags] = useState<string[]>([]);
   const [yTags, setYTags] = useState<string[]>([]);
+  const [classTag, setClassTag] = useState<string>(""); // histogram: แบ่งตาม status
   const [result, setResult] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -129,6 +137,11 @@ export default function AnalyticsPanel({
           type,
           source: "pi",
           ...(isCorr ? { xTags, yTags } : { tags }),
+          ...(type === "histogram" && classTag && tags[0]
+            ? classTag === DIGESTER_CLASS
+              ? { classMode: "digester" }
+              : { valueColumn: tags[0], classColumn: classTag }
+            : {}),
           start: range.start,
           end: range.end,
           interval,
@@ -153,7 +166,7 @@ export default function AnalyticsPanel({
   useEffect(() => {
     run.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, tags, xTags, yTags, interval]);
+  }, [type, tags, xTags, yTags, classTag, interval]);
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded border border-neutral-800 bg-neutral-950">
@@ -206,7 +219,33 @@ export default function AnalyticsPanel({
             label={label}
           />
         )}
-        {busy && <span className="ml-auto text-[10px] text-neutral-500">…</span>}
+        {type === "histogram" && (
+          <>
+            <span className="text-[10px] text-neutral-500">Class by</span>
+            <select
+              className="rounded border border-neutral-800 bg-black px-1.5 py-0.5 text-[10px] text-neutral-300 focus:border-blue-500 focus:outline-none"
+              value={classTag}
+              onChange={(e) => setClassTag(e.target.value)}
+            >
+              <option value="">(none)</option>
+              <option value={DIGESTER_CLASS}>Digester B1–B4 (Rule v1)</option>
+              {saved.map((s) => (
+                <option key={s.tag} value={s.tag}>
+                  {label(s.tag)}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        <button
+          onClick={() => run.current()}
+          disabled={busy}
+          title="Refresh analysis"
+          className="ml-auto rounded border border-neutral-800 bg-neutral-800 px-2 py-0.5 text-[10px] leading-none text-neutral-300 hover:bg-neutral-700 disabled:opacity-50"
+        >
+          ↻ Refresh
+        </button>
+        {busy && <span className="text-[10px] text-neutral-500">…</span>}
       </div>
 
       {/* Result */}
@@ -362,10 +401,25 @@ function ResultView({
     return <KdeCanvas data={d} descriptions={descriptions} height="100%" />;
   }
   if (type === "histogram") {
-    const d = result as HistogramData;
+    const d = result as HistogramData & { quality?: DigesterQuality };
     if (!d?.series?.length) return <Empty />;
+    const q = d.quality;
     return (
-      <HistogramCanvas data={d} descriptions={descriptions} height="100%" />
+      <div className="flex h-full flex-col">
+        {q && (
+          <div
+            className="px-1 pb-1 text-[10px] text-neutral-500"
+            title="Digester Rule v1 — docs/digester-rule.md"
+          >
+            Rule v1 · ระบุหม้อได้{" "}
+            {q.points - (q.byDigester.D0 ?? 0) - (q.byDigester.NaN ?? 0)}/{q.points} จุด
+            (D0 {q.byDigester.D0 ?? 0} · ซ้อน {q.byDigester.NaN ?? 0})
+          </div>
+        )}
+        <div className="min-h-0 flex-1">
+          <HistogramCanvas data={d} descriptions={descriptions} height="100%" />
+        </div>
+      </div>
     );
   }
   if (type === "clustering") {

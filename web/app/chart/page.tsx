@@ -44,7 +44,9 @@ interface TagStat {
 }
 
 function computeStats(values: (number | null)[]): TagStat {
-  const v = values.filter((x): x is number => x != null && !Number.isNaN(x));
+  const v = values
+    .map((x) => (x == null ? NaN : Number(x)))
+    .filter((x) => !Number.isNaN(x));
   const n = v.length;
   if (n === 0)
     return { count: 0, min: null, max: null, mean: null, median: null, std: null };
@@ -455,7 +457,7 @@ export default function ChartPage() {
               }`}
               onClick={() => {
                 setMode("chart");
-                if (!visible.chart) fetchData();
+                refreshChart();
               }}
               disabled={busy}
             >

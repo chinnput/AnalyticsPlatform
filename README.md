@@ -19,6 +19,7 @@ analytics platform/
 ## Dev setup (local)
 
 ### 1. Analysis service (FastAPI)
+
 ```powershell
 cd analysis-service
 python -m venv .venv
@@ -26,18 +27,22 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
+
 เช็ค: http://localhost:8000/health
 
 ### 2. Web (Next.js)
+
 ```powershell
 cd web
 npm install
 npm run dev
 ```
+
 เปิด: http://localhost:3000 → หน้าแรกจะแสดงสถานะ analysis-service
 
 ## Ports
-| Service | Port |
-|---|---|
-| web (Next.js) | 3000 |
+
+| Service                    | Port |
+| -------------------------- | ---- |
+| web (Next.js)              | 3000 |
 | analysis-service (FastAPI) | 8000 |

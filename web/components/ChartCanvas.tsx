@@ -100,7 +100,7 @@ export default function ChartCanvas({
     axisLabel: {
       fontSize: 10,
       color: color ?? "#737373",
-      formatter: (value: number) => value.toFixed(2),
+      formatter: (value: number) => Number(value).toFixed(2),
     },
     axisLine: color ? { show: true, lineStyle: { color } } : undefined,
     splitLine:
@@ -219,7 +219,7 @@ export default function ChartCanvas({
         name: label(name),
         type: "line",
         yAxisIndex: multi ? i : 0,
-        data: data.series[name],
+        data: data.series[name].map((v) => (v == null ? null : Number(v))),
         showSymbol: false,
         connectNulls: false,
         lineStyle: { width: 1.5, color },
