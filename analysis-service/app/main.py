@@ -10,6 +10,7 @@ from app.api.pi import router as pi_router
 from app.api.data import router as data_router
 from app.api.analyze import router as analyze_router
 from app.api.filter import router as filter_router
+from app.api.files import router as files_router
 
 app = FastAPI(title="Analytics Platform - Analysis Service", version="0.1.0")
 
@@ -26,6 +27,7 @@ app.include_router(pi_router)
 app.include_router(data_router)
 app.include_router(analyze_router)
 app.include_router(filter_router)
+app.include_router(files_router)
 
 
 @app.get("/")

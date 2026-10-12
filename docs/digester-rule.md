@@ -1,5 +1,8 @@
 # Digester Rule v1
 
+> ใช้เป็น class preset **"Press 1 Digester (B1–B4)"** (type `one-hot`) — `web/lib/classPresets.ts`,
+> engine: `analysis-service/app/pipeline/classify.py`
+
 ## Tag
 
 B1–B4 = `PPPC_DP_Cooking.Bk_Discharge_FinalTime_Press1_Status` — ค่าจริงมีแค่ **0 หรือ k**

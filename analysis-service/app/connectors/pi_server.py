@@ -67,6 +67,30 @@ class PiServerConnector(Connector):
         self._last_meta = self._extract_meta(data)
         return self._to_dataframe(data)
 
+    def fetch_chunked(
+        self,
+        tags: list[str],
+        start: str,
+        end: str,
+        interval: str = "1h",
+        chunk_days: int = 7,
+    ) -> pd.DataFrame:
+        """เหมือน fetch แต่ยิงทีละ chunk_days วัน (กัน request ใหญ่เกิน timeout เมื่อ interval ละเอียด)."""
+        t0, t_end = pd.Timestamp(start), pd.Timestamp(end)
+        frames: list[pd.DataFrame] = []
+        meta: dict = {}
+        while t0 < t_end:
+            t1 = min(t0 + pd.Timedelta(days=chunk_days), t_end)
+            frames.append(self.fetch(tags, str(t0), str(t1), interval))
+            meta = {**self._last_meta, **meta}
+            t0 = t1
+        self._last_meta = meta
+        frames = [f for f in frames if not f.empty]
+        if not frames:
+            return pd.DataFrame(columns=["timestamp"])
+        df = pd.concat(frames, ignore_index=True)
+        return df.drop_duplicates(subset="timestamp").sort_values("timestamp").reset_index(drop=True)
+
     _last_meta: dict = {}
 
     @staticmethod

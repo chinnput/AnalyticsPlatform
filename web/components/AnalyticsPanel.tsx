@@ -9,6 +9,14 @@ import SdBandCanvas, { SdData } from "@/components/SdBandCanvas";
 import KdeCanvas, { KdeData } from "@/components/KdeCanvas";
 import HistogramCanvas, { HistogramData } from "@/components/HistogramCanvas";
 import ClusterCanvas, { ClusterData } from "@/components/ClusterCanvas";
+import { CLASS_PRESETS } from "@/lib/classPresets";
+import {
+  classLabels,
+  classTagsOf,
+  type ClassDef,
+  type ClassUsage,
+  type PanelSettings,
+} from "@/lib/types";
 
 export type AnalysisKind =
   | "summary"
@@ -33,12 +41,23 @@ export const ANALYSIS_TOOLS: { key: AnalysisKind; label: string }[] = [
 const SINGLE_TAG: AnalysisKind[] = ["sd", "kde", "histogram"];
 // analysis ที่ต้องมีอย่างน้อย 2 tag
 const MULTI_MIN2: AnalysisKind[] = ["correlation", "clustering"];
-// histogram "Class by": แบ่งตาม Digester Rule v1 (docs/digester-rule.md)
-const DIGESTER_CLASS = "__digester__";
+// analysis ที่แบ่ง class ได้ (correlation ใช้ได้แค่ filter)
+const CLASS_TYPES: AnalysisKind[] = [
+  "summary",
+  "boxplot",
+  "histogram",
+  "kde",
+  "sd",
+  "correlation",
+  "clustering",
+];
+const FILTER_ONLY: AnalysisKind[] = ["correlation"];
 
-interface DigesterQuality {
+// จำนวนจุดต่อ class จาก backend (used = class ที่ถูกใช้, ที่เหลือถูกตัดทิ้ง)
+interface ClassInfo {
   points: number;
-  byDigester: Record<string, number>; // D0 = ไม่มีหม้อยืนยัน, NaN = ซ้อนกัน
+  counts: Record<string, number>;
+  used: string[];
 }
 
 export interface SummaryRow {
@@ -67,24 +86,71 @@ export default function AnalyticsPanel({
   descriptions,
   interval,
   resolveRange,
+  projectId,
+  initial,
+  onSettingsChange,
+  classDefs,
+  onAddClassDef,
 }: {
   saved: SavedTag[];
   descriptions: Record<string, string>;
   interval: string;
-  resolveRange: () => Range | null;
+  resolveRange: (tags?: string[]) => Range | null; // tags ใช้หาช่วงเวลาไฟล์
+  projectId: string;
+  initial?: PanelSettings; // ค่าที่จำไว้ใน project
+  onSettingsChange?: (s: PanelSettings) => void;
+  classDefs: ClassDef[]; // class definition ของ project
+  onAddClassDef: (def: ClassDef) => void; // copy preset เข้า project
 }) {
-  const [type, setType] = useState<AnalysisKind>("sd");
-  const [tags, setTags] = useState<string[]>([]);
-  const [xTags, setXTags] = useState<string[]>([]);
-  const [yTags, setYTags] = useState<string[]>([]);
-  const [classTag, setClassTag] = useState<string>(""); // histogram: แบ่งตาม status
+  const [type, setType] = useState<AnalysisKind>(
+    (initial?.type as AnalysisKind) ?? "sd",
+  );
+  const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
+  const [xTags, setXTags] = useState<string[]>(initial?.xTags ?? []);
+  const [yTags, setYTags] = useState<string[]>(initial?.yTags ?? []);
+  const [classUse, setClassUse] = useState<ClassUsage | null>(
+    initial?.classUse ?? null,
+  );
+
+  // แจ้ง page ให้บันทึกลง project เมื่อค่าเปลี่ยน
+  useEffect(() => {
+    onSettingsChange?.({ type, tags, xTags, yTags, classUse });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type, tags, xTags, yTags, classUse]);
   const [result, setResult] = useState<unknown>(null);
+  const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
 
   const single = SINGLE_TAG.includes(type);
   const isCorr = type === "correlation";
   const label = (t: string) => descriptions[t] || t;
+
+  const canClass = CLASS_TYPES.includes(type);
+  const classDef = classUse
+    ? classDefs.find((d) => d.id === classUse.defId) ?? null
+    : null;
+  const presets = CLASS_PRESETS.filter(
+    (p) => !classDefs.some((d) => d.id === p.id),
+  );
+
+  // เลือก definition: preset จะถูก copy เข้า project ก่อน · ค่าเริ่มต้น split ทุก class
+  function selectClassDef(id: string) {
+    if (!id) return setClassUse(null);
+    const def =
+      classDefs.find((d) => d.id === id) ?? presets.find((p) => p.id === id);
+    if (!def) return;
+    if (!classDefs.some((d) => d.id === id)) onAddClassDef(def);
+    setClassUse({ defId: id, mode: "split", include: classLabels(def) });
+  }
+
+  function toggleInclude(c: string) {
+    if (!classUse) return;
+    const include = classUse.include.includes(c)
+      ? classUse.include.filter((x) => x !== c)
+      : [...classUse.include, c];
+    setClassUse({ ...classUse, include });
+  }
 
   function changeType(next: AnalysisKind) {
     setResult(null);
@@ -122,9 +188,19 @@ export default function AnalyticsPanel({
       setMsg("ต้องเลือกอย่างน้อย 2 tags");
       return;
     }
-    const range = resolveRange();
+    const range = resolveRange(
+      isCorr ? [...xTags, ...yTags] : [...tags, ...(classDef ? classTagsOf(classDef) : [])],
+    );
     if (!range) {
-      setMsg("เลือกช่วงเวลา custom ก่อน");
+      setMsg("เลือกช่วงเวลา custom ก่อน (หรือ project ยังไม่มีไฟล์)");
+      return;
+    }
+    const useClass = canClass && classUse && classDef;
+    const classMode =
+      classUse && FILTER_ONLY.includes(type) ? "filter" : classUse?.mode;
+    if (useClass && classUse.include.length === 0) {
+      setResult(null);
+      setMsg("เลือกอย่างน้อย 1 class");
       return;
     }
     setBusy(true);
@@ -136,11 +212,16 @@ export default function AnalyticsPanel({
         body: JSON.stringify({
           type,
           source: "pi",
+          project: projectId,
           ...(isCorr ? { xTags, yTags } : { tags }),
-          ...(type === "histogram" && classTag && tags[0]
-            ? classTag === DIGESTER_CLASS
-              ? { classMode: "digester" }
-              : { valueColumn: tags[0], classColumn: classTag }
+          ...(useClass
+            ? {
+                classSpec: {
+                  definition: classDef,
+                  mode: classMode,
+                  include: classUse.include,
+                },
+              }
             : {}),
           start: range.start,
           end: range.end,
@@ -151,12 +232,15 @@ export default function AnalyticsPanel({
       if (!res.ok) {
         setMsg(json.detail || json.error || "Analysis failed");
         setResult(null);
+        setClassInfo(null);
         return;
       }
       setResult(json.result ?? null);
+      setClassInfo(json.classInfo ?? null);
     } catch {
       setMsg("Service unreachable");
       setResult(null);
+      setClassInfo(null);
     } finally {
       setBusy(false);
     }
@@ -166,7 +250,7 @@ export default function AnalyticsPanel({
   useEffect(() => {
     run.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, tags, xTags, yTags, classTag, interval]);
+  }, [type, tags, xTags, yTags, classUse, classDef, interval]);
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded border border-neutral-800 bg-neutral-950">
@@ -219,22 +303,72 @@ export default function AnalyticsPanel({
             label={label}
           />
         )}
-        {type === "histogram" && (
+        {canClass && (
           <>
-            <span className="text-[10px] text-neutral-500">Class by</span>
+            <span className="ml-1 text-[10px] text-neutral-500">Class</span>
             <select
               className="rounded border border-neutral-800 bg-black px-1.5 py-0.5 text-[10px] text-neutral-300 focus:border-blue-500 focus:outline-none"
-              value={classTag}
-              onChange={(e) => setClassTag(e.target.value)}
+              value={classDef ? classDef.id : ""}
+              onChange={(e) => selectClassDef(e.target.value)}
             >
-              <option value="">(none)</option>
-              <option value={DIGESTER_CLASS}>Digester B1–B4 (Rule v1)</option>
-              {saved.map((s) => (
-                <option key={s.tag} value={s.tag}>
-                  {label(s.tag)}
+              <option value="">(off)</option>
+              {classDefs.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
                 </option>
               ))}
+              {presets.length > 0 && (
+                <optgroup label="Presets">
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
+            {classUse && classDef && (
+              <>
+                {FILTER_ONLY.includes(type) ? (
+                  <span className="text-[10px] text-neutral-500">filter</span>
+                ) : (
+                  <select
+                    className="rounded border border-neutral-800 bg-black px-1.5 py-0.5 text-[10px] text-neutral-300 focus:border-blue-500 focus:outline-none"
+                    value={classUse.mode}
+                    onChange={(e) =>
+                      setClassUse({
+                        ...classUse,
+                        mode: e.target.value as ClassUsage["mode"],
+                      })
+                    }
+                    title={
+                      type === "clustering"
+                        ? "filter = k-means เฉพาะ class ที่เลือก · split = ระบายสี/เทียบ cluster กับ class"
+                        : "filter = ใช้เฉพาะ class ที่เลือก · split = แยกผลตาม class"
+                    }
+                  >
+                    <option value="split">split</option>
+                    <option value="filter">filter</option>
+                  </select>
+                )}
+                {classLabels(classDef).map((c) => {
+                  const on = classUse.include.includes(c);
+                  return (
+                    <button
+                      key={c}
+                      onClick={() => toggleInclude(c)}
+                      className={`rounded border px-1.5 py-0.5 text-[10px] leading-none ${
+                        on
+                          ? "border-blue-600 bg-blue-600/20 text-blue-300"
+                          : "border-neutral-800 text-neutral-600 line-through"
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </>
         )}
         <button
@@ -249,15 +383,18 @@ export default function AnalyticsPanel({
       </div>
 
       {/* Result */}
-      <div className="min-h-0 flex-1 overflow-hidden p-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-1">
         {msg && <div className="mb-1 text-[10px] text-amber-400">{msg}</div>}
+        {classInfo && result != null && <ClassInfoLine info={classInfo} />}
         {!result && !msg && (
           <div className="flex h-full items-center justify-center text-[11px] text-neutral-600">
             เลือก type + tag
           </div>
         )}
         {result != null && (
-          <ResultView type={type} result={result} descriptions={descriptions} />
+          <div className="min-h-0 flex-1">
+            <ResultView type={type} result={result} descriptions={descriptions} />
+          </div>
         )}
       </div>
     </div>
@@ -401,25 +538,10 @@ function ResultView({
     return <KdeCanvas data={d} descriptions={descriptions} height="100%" />;
   }
   if (type === "histogram") {
-    const d = result as HistogramData & { quality?: DigesterQuality };
+    const d = result as HistogramData;
     if (!d?.series?.length) return <Empty />;
-    const q = d.quality;
     return (
-      <div className="flex h-full flex-col">
-        {q && (
-          <div
-            className="px-1 pb-1 text-[10px] text-neutral-500"
-            title="Digester Rule v1 — docs/digester-rule.md"
-          >
-            Rule v1 · ระบุหม้อได้{" "}
-            {q.points - (q.byDigester.D0 ?? 0) - (q.byDigester.NaN ?? 0)}/{q.points} จุด
-            (D0 {q.byDigester.D0 ?? 0} · ซ้อน {q.byDigester.NaN ?? 0})
-          </div>
-        )}
-        <div className="min-h-0 flex-1">
-          <HistogramCanvas data={d} descriptions={descriptions} height="100%" />
-        </div>
-      </div>
+      <HistogramCanvas data={d} descriptions={descriptions} height="100%" />
     );
   }
   if (type === "clustering") {
@@ -430,6 +552,22 @@ function ResultView({
     );
   }
   return <Empty />;
+}
+
+// จำนวนจุดที่ใช้ต่อ class + ที่ถูกตัดทิ้ง (class ที่ไม่ได้เลือก / none / NaN)
+function ClassInfoLine({ info }: { info: ClassInfo }) {
+  const used = info.used.map((c) => `${c} ${info.counts[c] ?? 0}`);
+  const dropped = Object.entries(info.counts)
+    .filter(([c]) => !info.used.includes(c))
+    .map(([c, n]) => `${c} ${n}`);
+  return (
+    <div className="px-1 pb-1 text-[10px] text-neutral-500">
+      Class: {used.join(" · ")}
+      {dropped.length > 0 && (
+        <span className="text-neutral-600"> · ตัดทิ้ง: {dropped.join(" · ")}</span>
+      )}
+    </div>
+  );
 }
 
 function Empty() {

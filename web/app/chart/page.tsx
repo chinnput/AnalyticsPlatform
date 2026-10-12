@@ -1,20 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import ChartCanvas, {
   ChartData,
   DrawMode,
   Annotation,
+  bandsFromClasses,
 } from "@/components/ChartCanvas";
 import AnalyticsPanel from "@/components/AnalyticsPanel";
-
-type RangePreset = "1D" | "1W" | "1M" | "custom";
-
-interface SavedTag {
-  tag: string;
-  description?: string;
-  group?: string;
-}
+import ClassDefEditor from "@/components/ClassDefEditor";
+import { CLASS_PRESETS } from "@/lib/classPresets";
+import { classLabels } from "@/lib/types";
+import { fileIdOfTag } from "@/lib/types";
+import type {
+  ProjectFile,
+  ChartClassUsage,
+  ClassDef,
+  PanelSettings,
+  Project,
+  ProjectSettings,
+  RangePreset,
+  SavedTag,
+} from "@/lib/types";
 
 function fmt(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -61,25 +69,83 @@ function computeStats(values: (number | null)[]): TagStat {
 const fmtNum = (x: number | null) =>
   x == null ? "-" : Math.abs(x) >= 1000 || Number.isInteger(x) ? x.toFixed(0) : x.toFixed(2);
 
-export default function ChartPage() {
-  const [activeTags, setActiveTags] = useState<string[]>([
-    "PULP-LINE2-KAPPA-PRESS1",
-  ]);
+// useSearchParams ต้องอยู่ใน Suspense (Next.js app router)
+export default function ChartRoute() {
+  return (
+    <Suspense>
+      <ChartGate />
+    </Suspense>
+  );
+}
+
+// ต้องเลือก project ก่อน — ไม่มี project = ไม่มี tag ให้ใช้
+function ChartGate() {
+  const projectId = useSearchParams().get("project");
+  const [project, setProject] = useState<Project | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`/api/projects/${encodeURIComponent(projectId)}`, { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error();
+        setProject(await res.json());
+      })
+      .catch(() => setError("ไม่พบ project นี้"));
+  }, [projectId]);
+
+  if (!projectId || error) {
+    return (
+      <main className="flex h-screen flex-col items-center justify-center gap-3 bg-black text-[12px] text-neutral-400">
+        <p>{error || "ยังไม่ได้เลือก project"}</p>
+        <a
+          href="/projects"
+          className="rounded bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-500"
+        >
+          ไปหน้า Projects →
+        </a>
+      </main>
+    );
+  }
+  if (!project) {
+    return <main className="h-screen bg-black" />;
+  }
+  return <ChartPage key={project.id} project={project} />;
+}
+
+function ChartPage({ project }: { project: Project }) {
+  const s0 = project.settings ?? {};
+  const [activeTags, setActiveTags] = useState<string[]>(s0.activeTags ?? []);
   const [tagInput, setTagInput] = useState("");
-  const [preset, setPreset] = useState<RangePreset>("1D");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
-  const [interval, setInterval] = useState("1h");
+  const [preset, setPreset] = useState<RangePreset>(s0.preset ?? "1D");
+  const [customStart, setCustomStart] = useState(s0.customStart ?? "");
+  const [customEnd, setCustomEnd] = useState(s0.customEnd ?? "");
+  const [interval, setInterval] = useState(s0.interval ?? "1h");
   const [data, setData] = useState<ChartData | null>(null);
   const [descriptions, setDescriptions] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [saved, setSaved] = useState<SavedTag[]>([]);
+  const [saved, setSaved] = useState<SavedTag[]>(project.tags ?? []);
   const [visible, setVisible] = useState({ chart: false });
-  const [mode, setMode] = useState<Mode>("chart");
-  const [panelCount, setPanelCount] = useState(1);
+  const [mode, setMode] = useState<Mode>(s0.mode ?? "chart");
+  const [panelCount, setPanelCount] = useState(s0.panelCount ?? 1);
+  const [panels, setPanels] = useState<PanelSettings[]>(s0.panels ?? []);
   const [newGroup, setNewGroup] = useState("");
-  const [groups, setGroups] = useState<string[]>([]);
+  const [groups, setGroups] = useState<string[]>(project.groups ?? []);
+  const [files, setFiles] = useState<ProjectFile[]>(project.files ?? []);
+  const [uploading, setUploading] = useState(false);
+  const [classDefs, setClassDefs] = useState<ClassDef[]>(project.classDefs ?? []);
+  const [chartClass, setChartClass] = useState<ChartClassUsage | null>(
+    s0.chartClass ?? null,
+  );
+  const [chartClasses, setChartClasses] = useState<(string | null)[] | null>(null);
+  const [showClassEditor, setShowClassEditor] = useState(false);
+  const chartClassDef = chartClass
+    ? classDefs.find((d) => d.id === chartClass.defId) ?? null
+    : null;
+  const classPresets = CLASS_PRESETS.filter(
+    (p) => !classDefs.some((d) => d.id === p.id),
+  );
   const [rightOpen, setRightOpen] = useState(true);
   const [rightWidth, setRightWidth] = useState(256);
   const [iqrOn, setIqrOn] = useState(false);
@@ -88,16 +154,102 @@ export default function ChartPage() {
     { tag: string; total: number; outliers: number }[] | null
   >(null);
   const [scaleMode, setScaleMode] = useState<"single" | "multiple" | "range">(
-    "multiple",
+    s0.scaleMode ?? "multiple",
   );
   const [scaleMin, setScaleMin] = useState("");
   const [scaleMax, setScaleMax] = useState("");
   const [drawMode, setDrawMode] = useState<DrawMode>("none");
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
 
+  const patchProject = (patch: Partial<Project>) =>
+    fetch(`/api/projects/${project.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => setMessage("บันทึก project ไม่สำเร็จ"));
+
+  // บันทึกค่าที่ตั้งไว้อัตโนมัติเมื่อเปลี่ยน (debounce) — ข้ามรอบแรกที่เพิ่งโหลด
+  const firstRender = useRef(true);
   useEffect(() => {
-    loadSaved();
-  }, []);
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    const settings: ProjectSettings = {
+      preset,
+      customStart,
+      customEnd,
+      interval,
+      activeTags,
+      mode,
+      scaleMode,
+      panelCount,
+      panels,
+      chartClass,
+    };
+    const t = setTimeout(() => patchProject({ settings }), 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset, customStart, customEnd, interval, activeTags, mode, scaleMode, panelCount, panels, chartClass]);
+
+  // เปลี่ยน class บน chart → ดึงใหม่ทันทีถ้ากราฟเปิดอยู่
+  const chartClassFirst = useRef(true);
+  useEffect(() => {
+    if (chartClassFirst.current) {
+      chartClassFirst.current = false;
+      return;
+    }
+    if (visible.chart) refreshChart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chartClass, chartClassDef]);
+
+  // บันทึกจาก Class Settings — definition ที่ถูกลบ: chart กลับเป็น off
+  function saveClassDefs(next: ClassDef[]) {
+    setClassDefs(next);
+    patchProject({ classDefs: next });
+    if (chartClass && !next.some((d) => d.id === chartClass.defId)) setChartClass(null);
+  }
+
+  const usedClassIds = [
+    ...panels.map((p) => p?.classUse?.defId),
+    chartClass?.defId,
+  ].filter((x): x is string => !!x);
+
+  // เลือก definition ให้ chart: preset จะถูก copy เข้า project ก่อน · เริ่มที่ shade ทุก class
+  function selectChartClass(id: string) {
+    if (!id) return setChartClass(null);
+    const def =
+      classDefs.find((d) => d.id === id) ?? classPresets.find((p) => p.id === id);
+    if (!def) return;
+    addClassDef(def);
+    setChartClass({ defId: id, mode: "shade", include: classLabels(def) });
+  }
+
+  function toggleChartClass(c: string) {
+    if (!chartClass) return;
+    const include = chartClass.include.includes(c)
+      ? chartClass.include.filter((x) => x !== c)
+      : [...chartClass.include, c];
+    setChartClass({ ...chartClass, include });
+  }
+
+  // class definition ของ project (preset ที่เลือกจะถูก copy เข้ามา)
+  function addClassDef(def: ClassDef) {
+    setClassDefs((prev) => {
+      if (prev.some((d) => d.id === def.id)) return prev;
+      const next = [...prev, def];
+      patchProject({ classDefs: next });
+      return next;
+    });
+  }
+
+  function updatePanel(i: number, s: PanelSettings) {
+    setPanels((prev) => {
+      const next = [...prev];
+      next[i] = s;
+      return next;
+    });
+  }
 
   // ลากขอบซ้ายของแถบขวาเพื่อปรับความกว้าง
   function startResize(e: React.MouseEvent) {
@@ -114,16 +266,6 @@ export default function ChartPage() {
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }
-
-  async function loadSaved() {
-    try {
-      const res = await fetch("/api/tags");
-      const json = await res.json();
-      setSaved(json.tags ?? []);
-    } catch {
-      /* ignore */
-    }
   }
 
   function addTag(tag: string) {
@@ -156,34 +298,86 @@ export default function ChartPage() {
   const isSaved = (tag: string) => saved.some((t) => t.tag === tag);
   const isActive = (tag: string) => activeTags.includes(tag);
 
-  async function toggleSave(tag: string) {
-    if (isSaved(tag)) {
-      await fetch(`/api/tags?tag=${encodeURIComponent(tag)}`, {
-        method: "DELETE",
-      });
-    } else {
-      await fetch("/api/tags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tag, description: descriptions[tag] ?? "" }),
-      });
-    }
-    loadSaved();
+  // tag/group เก็บใน project — เปลี่ยนแล้วบันทึกทันที
+  function saveTags(next: SavedTag[]) {
+    setSaved(next);
+    patchProject({ tags: next });
   }
 
-  async function setTagGroup(tag: string, group: string) {
-    await fetch("/api/tags", {
-      method: "POST",
+  function toggleSave(tag: string) {
+    saveTags(
+      isSaved(tag)
+        ? saved.filter((t) => t.tag !== tag)
+        : [...saved, { tag, description: descriptions[tag] ?? "", group: "" }],
+    );
+  }
+
+  // tag ที่ยังไม่ save จะถูก save พร้อม group
+  function setTagGroup(tag: string, group: string) {
+    saveTags(
+      isSaved(tag)
+        ? saved.map((t) => (t.tag === tag ? { ...t, group } : t))
+        : [...saved, { tag, description: descriptions[tag] ?? "", group }],
+    );
+  }
+
+  // ---- ไฟล์ CSV/Excel ของ project ----
+  function applyProject(p: Project) {
+    setSaved(p.tags);
+    setGroups(p.groups);
+    setFiles(p.files ?? []);
+  }
+
+  async function fileRequest(init: RequestInit, query = "") {
+    setUploading(true);
+    setMessage("");
+    try {
+      const res = await fetch(`/api/projects/${project.id}/files${query}`, init);
+      const json = await res.json();
+      if (!res.ok) {
+        setMessage(json.error || "ไฟล์ผิดพลาด");
+        return null;
+      }
+      applyProject(json);
+      return json as Project;
+    } catch {
+      setMessage("อัปโหลดไม่สำเร็จ");
+      return null;
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function uploadFile(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    const p = await fileRequest({ method: "POST", body: form });
+    const f = p?.files?.[p.files.length - 1];
+    if (f) setMessage(`${f.name}: ${f.rows.toLocaleString()} rows · ${f.columns.length} tags`);
+  }
+
+  function reingestFile(fileId: string, opts: { sheet?: string; timeColumn?: string }) {
+    return fileRequest({
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tag, description: descriptions[tag] ?? "", group }),
+      body: JSON.stringify({ fileId, ...opts }),
     });
-    loadSaved();
+  }
+
+  async function deleteFile(f: ProjectFile) {
+    if (!confirm(`ลบไฟล์ "${f.name}" และ tag ทั้งหมดของไฟล์นี้?`)) return;
+    const p = await fileRequest({ method: "DELETE" }, `?fileId=${encodeURIComponent(f.id)}`);
+    if (p) setActiveTags((prev) => prev.filter((t) => fileIdOfTag(t) !== f.id));
   }
 
   function createGroup() {
     const g = newGroup.trim();
     if (!g) return;
-    setGroups((prev) => (prev.includes(g) ? prev : [...prev, g]));
+    if (!groups.includes(g)) {
+      const next = [...groups, g];
+      setGroups(next);
+      patchProject({ groups: next });
+    }
     setNewGroup("");
   }
 
@@ -243,18 +437,14 @@ export default function ChartPage() {
       return;
     }
 
-    let start: string;
-    let end: string;
-    if (preset === "custom") {
-      if (!customStart || !customEnd) {
-        setMessage("Select a custom time range");
-        return;
-      }
-      start = customStart.replace("T", " ") + ":00";
-      end = customEnd.replace("T", " ") + ":00";
-    } else {
-      ({ start, end } = rangeFromPreset(preset));
+    const range = resolveRange(tags);
+    if (!range) {
+      setMessage(
+        preset === "file" ? "ยังไม่มีไฟล์ใน project" : "Select a custom time range",
+      );
+      return;
     }
+    const { start, end } = range;
 
     setBusy(true);
     setMessage("");
@@ -264,19 +454,31 @@ export default function ChartPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           source: "pi",
+          project: project.id,
           tags,
           start,
           end,
           interval,
           iqr: { enabled: iqrOn, k: iqrK },
+          ...(chartClass && chartClassDef
+            ? {
+                classSpec: {
+                  definition: chartClassDef,
+                  mode: chartClass.mode,
+                  include: chartClass.include,
+                },
+              }
+            : {}),
         }),
       });
       const json = await res.json();
       if (!res.ok) {
         setMessage(json.detail || json.error || "Failed to load data");
         setData(null);
+        setChartClasses(null);
       } else {
         setData({ timestamps: json.timestamps, series: json.series });
+        setChartClasses(json.classes ?? null);
         const descMap: Record<string, string> = {};
         const raw = json.meta?.descriptions ?? {};
         for (const [tag, info] of Object.entries(raw)) {
@@ -317,7 +519,17 @@ export default function ChartPage() {
     );
   }
 
-  function resolveRange(): { start: string; end: string } | null {
+  // tags: ใช้หาไฟล์ที่เกี่ยวข้องเมื่อเลือก "All (file)" (ไม่มี tag จากไฟล์ → ใช้ทุกไฟล์)
+  function resolveRange(tags: string[] = activeTags): { start: string; end: string } | null {
+    if (preset === "file") {
+      const ids = new Set(tags.map(fileIdOfTag).filter(Boolean));
+      const fs = files.filter((f) => ids.size === 0 || ids.has(f.id));
+      if (fs.length === 0) return null;
+      return {
+        start: fs.map((f) => f.start).sort()[0],
+        end: fs.map((f) => f.end).sort().reverse()[0],
+      };
+    }
     if (preset === "custom") {
       if (!customStart || !customEnd) return null;
       return {
@@ -341,8 +553,15 @@ export default function ChartPage() {
     <main className="h-screen overflow-hidden bg-black text-[12px] text-neutral-300">
       <div className="flex h-full flex-col">
         <div className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-1.5">
+          <a
+            href="/projects"
+            className="text-[10px] text-neutral-500 hover:text-neutral-200"
+            title="All projects"
+          >
+            ← Projects
+          </a>
           <h1 className="text-xs font-semibold text-neutral-100">
-            Analytics Platform
+            {project.name}
           </h1>
           <div className="flex items-center gap-1">
             <span className="text-[10px] uppercase tracking-wide text-neutral-500">
@@ -357,6 +576,9 @@ export default function ChartPage() {
               <option value="1W">1 Week</option>
               <option value="1M">1 Month</option>
               <option value="custom">Custom</option>
+              {(files.length > 0 || preset === "file") && (
+                <option value="file">All (file)</option>
+              )}
             </select>
           </div>
           {preset === "custom" && (
@@ -435,6 +657,75 @@ export default function ChartPage() {
                     onChange={(e) => setScaleMax(e.target.value)}
                     placeholder="max"
                   />
+                </>
+              )}
+            </div>
+          )}
+          <button
+            onClick={() => setShowClassEditor(true)}
+            title="Class Settings — สร้าง/แก้ class definition ของ project"
+            className="rounded bg-neutral-800 px-2 py-1 text-[11px] leading-none text-neutral-300 hover:bg-neutral-700"
+          >
+            ⚙ Classes
+          </button>
+          {mode === "chart" && (
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+                Class
+              </span>
+              <select
+                className="input"
+                value={chartClassDef ? chartClassDef.id : ""}
+                onChange={(e) => selectChartClass(e.target.value)}
+              >
+                <option value="">(off)</option>
+                {classDefs.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+                {classPresets.length > 0 && (
+                  <optgroup label="Presets">
+                    {classPresets.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {chartClass && chartClassDef && (
+                <>
+                  <select
+                    className="input"
+                    value={chartClass.mode}
+                    onChange={(e) =>
+                      setChartClass({
+                        ...chartClass,
+                        mode: e.target.value as ChartClassUsage["mode"],
+                      })
+                    }
+                    title="shade = แถบสีพื้นหลังตาม class · filter = ซ่อนจุดนอก class ที่เลือก"
+                  >
+                    <option value="shade">shade</option>
+                    <option value="filter">filter</option>
+                  </select>
+                  {classLabels(chartClassDef).map((c) => {
+                    const on = chartClass.include.includes(c);
+                    return (
+                      <button
+                        key={c}
+                        onClick={() => toggleChartClass(c)}
+                        className={`rounded border px-1.5 py-0.5 text-[10px] leading-none ${
+                          on
+                            ? "border-blue-600 bg-blue-600/20 text-blue-300"
+                            : "border-neutral-800 text-neutral-600 line-through"
+                        }`}
+                      >
+                        {c}
+                      </button>
+                    );
+                  })}
                 </>
               )}
             </div>
@@ -564,6 +855,12 @@ export default function ChartPage() {
                       drawMode={drawMode}
                       annotations={annotations}
                       onPlaceAnnotation={placeAnnotation}
+                      classBands={
+                        chartClasses && chartClass?.mode === "shade"
+                          ? bandsFromClasses(chartClasses)
+                          : []
+                      }
+                      classOrder={chartClassDef ? classLabels(chartClassDef) : []}
                     />
                   </div>
                   {annotations.length > 0 && (
@@ -693,6 +990,11 @@ export default function ChartPage() {
                     descriptions={descriptions}
                     interval={interval}
                     resolveRange={resolveRange}
+                    projectId={project.id}
+                    initial={panels[i]}
+                    onSettingsChange={(s) => updatePanel(i, s)}
+                    classDefs={classDefs}
+                    onAddClassDef={addClassDef}
                   />
                 ))}
               </div>
@@ -797,6 +1099,92 @@ export default function ChartPage() {
                 </div>
               </div>
             )}
+
+            <div className="border-t border-neutral-800 pt-3">
+              <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wide text-neutral-500">
+                <span>Files (CSV / Excel)</span>
+                <label
+                  className={`cursor-pointer rounded bg-neutral-800 px-2 py-0.5 normal-case text-neutral-200 hover:bg-neutral-700 ${
+                    uploading ? "pointer-events-none opacity-50" : ""
+                  }`}
+                >
+                  {uploading ? "กำลังอ่าน…" : "⬆ Upload"}
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) uploadFile(f);
+                    }}
+                  />
+                </label>
+              </div>
+              {files.length === 0 ? (
+                <p className="text-[10px] text-neutral-600">
+                  column แรก = เวลา, column ตัวเลข = tag (ใช้ร่วมกับ PI tag ไม่ได้)
+                </p>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {files.map((f) => (
+                    <div
+                      key={f.id}
+                      className="rounded border border-neutral-800 bg-neutral-900 p-1.5 text-[10px]"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span className="flex-1 truncate font-medium text-neutral-200" title={f.name}>
+                          {f.name}
+                        </span>
+                        <button
+                          onClick={() => deleteFile(f)}
+                          title="ลบไฟล์"
+                          className="text-neutral-600 hover:text-red-400"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <div className="text-neutral-500">
+                        {f.rows.toLocaleString()} rows · {f.columns.length} tags
+                        <br />
+                        {f.start} → {f.end}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1 text-neutral-500">
+                        {f.sheets.length > 1 && (
+                          <select
+                            className="mini"
+                            value={f.sheet ?? ""}
+                            disabled={uploading}
+                            onChange={(e) => reingestFile(f.id, { sheet: e.target.value })}
+                            title="Sheet"
+                          >
+                            {f.sheets.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <span>เวลา</span>
+                        <select
+                          className="mini"
+                          value={f.timeColumn}
+                          disabled={uploading}
+                          onChange={(e) => reingestFile(f.id, { timeColumn: e.target.value })}
+                          title="Column เวลา"
+                        >
+                          {f.allColumns.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div className="border-t border-neutral-800 pt-3">
               <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-500">
@@ -929,6 +1317,16 @@ export default function ChartPage() {
           )}
         </div>
       </div>
+
+      {showClassEditor && (
+        <ClassDefEditor
+          defs={classDefs}
+          tags={saved}
+          usedIds={usedClassIds}
+          onSave={saveClassDefs}
+          onClose={() => setShowClassEditor(false)}
+        />
+      )}
 
       <style jsx>{`
         .input {

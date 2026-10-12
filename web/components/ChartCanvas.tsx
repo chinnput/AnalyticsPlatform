@@ -42,6 +42,27 @@ const AXIS_COLORS = [
   "#22d3ee",
 ];
 
+// ---- แถบสีพื้นหลังตาม class ----
+export const CLASS_COLORS = ["#3b82f6", "#22c55e", "#f59e0b", "#a855f7", "#ec4899", "#06b6d4"];
+
+export interface ClassBand {
+  label: string;
+  start: number; // index ของ timestamp
+  end: number;
+}
+
+// classes[i] = class ของ timestamp i (null = ไม่อยู่ใน class ที่เลือก) → ช่วงต่อเนื่องของ class เดียวกัน
+export function bandsFromClasses(classes: (string | null)[]): ClassBand[] {
+  const bands: ClassBand[] = [];
+  classes.forEach((c, i) => {
+    const last = bands[bands.length - 1];
+    if (c == null) return;
+    if (last && last.label === c && last.end === i - 1) last.end = i;
+    else bands.push({ label: c, start: i, end: i });
+  });
+  return bands;
+}
+
 // ค่าล่าสุดที่ไม่ใช่ null ของ series
 function lastValue(vals: (number | null)[]): number | null {
   for (let i = vals.length - 1; i >= 0; i--) {
@@ -61,7 +82,11 @@ export default function ChartCanvas({
   drawMode = "none",
   annotations = [],
   onPlaceAnnotation,
+  classBands = [],
+  classOrder = [],
 }: {
+  classBands?: ClassBand[];
+  classOrder?: string[]; // ลำดับ class → กำหนดสี
   data: ChartData;
   interval?: string;
   descriptions?: Record<string, string>;
@@ -118,6 +143,23 @@ export default function ChartCanvas({
   const rightAxes = multi ? Math.floor(seriesNames.length / 2) : 0;
   const gridLeft = 50 + Math.max(0, leftAxes - 1) * 42;
   const gridRight = 20 + rightAxes * 42;
+
+  const classColor = (c: string) =>
+    CLASS_COLORS[Math.max(0, classOrder.indexOf(c)) % CLASS_COLORS.length];
+  const markArea =
+    classBands.length > 0
+      ? {
+          silent: true,
+          data: classBands.map((b) => [
+            {
+              xAxis: data.timestamps[b.start],
+              itemStyle: { color: classColor(b.label), opacity: 0.12 },
+            },
+            // ครอบถึงจุดถัดไป ไม่งั้นช่วงที่มีจุดเดียวจะกว้าง 0
+            { xAxis: data.timestamps[Math.min(b.end + 1, data.timestamps.length - 1)] },
+          ]),
+        }
+      : undefined;
 
   const option = {
     backgroundColor: "transparent",
@@ -225,6 +267,7 @@ export default function ChartCanvas({
         lineStyle: { width: 1.5, color },
         itemStyle: { color },
         ...(markLine ? { markLine } : {}),
+        ...(i === 0 && markArea ? { markArea } : {}),
       };
     }),
   };
@@ -250,6 +293,20 @@ export default function ChartCanvas({
   }
 
   return (
+    <>
+    {classBands.length > 0 && (
+      <div className="flex flex-wrap items-center gap-2 px-1 text-[10px] text-neutral-400">
+        {classOrder.map((c) => (
+          <span key={c} className="flex items-center gap-1">
+            <span
+              className="inline-block h-2 w-3 rounded-sm"
+              style={{ backgroundColor: classColor(c), opacity: 0.6 }}
+            />
+            {c}
+          </span>
+        ))}
+      </div>
+    )}
     <ReactECharts
       ref={chartRef}
       option={option}
@@ -267,5 +324,6 @@ export default function ChartCanvas({
         );
       }}
     />
+    </>
   );
 }

@@ -24,10 +24,10 @@ export default async function Home() {
 
       <div className="mt-4 flex gap-3">
         <a
-          href="/chart"
+          href="/projects"
           className="inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500"
         >
-          PI Server Chart →
+          Projects →
         </a>
         <a
           href="/connect"

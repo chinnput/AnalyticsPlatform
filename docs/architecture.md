@@ -65,39 +65,24 @@ User
 
 ## 3. Metadata (ไฟล์ JSON — ไม่มี DB)
 
-metadata เก็บเป็นไฟล์ JSON ใน `web/data/` (gitignored) โครงสร้างตาม `web/lib/types.ts`:
+metadata เก็บเป็นไฟล์ JSON ต่อ **project** ที่ `web/data/projects/<id>.json` (gitignored)
+โครงสร้างตาม `Project` ใน `web/lib/types.ts`, อ่าน/เขียนผ่าน `web/lib/projects.ts`:
 
 ```jsonc
-// web/data/workspace_default.json
+// web/data/projects/golden-batch.json
 {
-  "name": "default",
-  "layout": "single",            // single | grid-2x2 | tabs
-  "panels": [
-    {
-      "id": "p1",
-      "title": "Reactor Temp",
-      "chartType": "line",        // line | area | bar | scatter
-      "tags": [
-        {
-          "source": "sql-prod",
-          "database": "ProductionReport",
-          "table": "dbo.Roll",
-          "timeColumn": "User_create_date",
-          "valueColumn": "Roll_length",
-          "label": "Roll length"
-        }
-      ]
-    }
-  ],
-  "groups": [
-    { "id": "g1", "name": "Reactor Zone A", "tags": [] }
-  ],
-  "updatedAt": "2026-09-18T00:00:00Z"
+  "id": "golden-batch",
+  "name": "Golden Batch",
+  "createdAt": "...", "updatedAt": "...",
+  "tags": [ { "tag": "PULP-LINE2-KAPPA-PRESS1", "description": "", "group": "LAB" } ],
+  "groups": ["LAB", "param"],
+  "classDefs": [ { "id": "press1-digester", "type": "one-hot", ... } ],  // ดู app/pipeline/classify.py
+  "settings": { "interval": "15m", "activeTags": [...], "panels": [...], "chartClass": {...} }
 }
 ```
 
-> `Workspace` = โต๊ะทำงานแบบ TradingView (บันทึก layout, panels, tag refs)
-> save/load ผ่าน `GET/POST /api/workspace?name=...`
+> API: `GET/POST /api/projects` (list / create / restore จากถัง) · `GET/PATCH/DELETE /api/projects/<id>`
+> ลบ = ย้ายไป `web/data/projects/_trash/` แล้วลบถาวรเมื่อเกิน 7 วัน
 
 ---
 
