@@ -122,6 +122,8 @@ export default function AnalyticsPanel({
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  // clustering: null = เลือก k อัตโนมัติด้วย Elbow method (ไม่จำค่าไว้ใน project)
+  const [k, setK] = useState<number | null>(null);
 
   const single = SINGLE_TAG.includes(type);
   const isCorr = type === "correlation";
@@ -215,6 +217,7 @@ export default function AnalyticsPanel({
           source: "pi",
           project: projectId,
           ...(isCorr ? { xTags, yTags } : { tags }),
+          ...(type === "clustering" ? { k } : {}),
           ...(useClass
             ? {
                 classSpec: {
@@ -251,7 +254,7 @@ export default function AnalyticsPanel({
   useEffect(() => {
     run.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, tags, xTags, yTags, classUse, classDef, interval]);
+  }, [type, tags, xTags, yTags, classUse, classDef, interval, k]);
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded border border-neutral-800 bg-neutral-950">
@@ -370,6 +373,26 @@ export default function AnalyticsPanel({
                 })}
               </>
             )}
+          </>
+        )}
+        {type === "clustering" && (
+          <>
+            <span className="ml-1 text-[10px] text-neutral-500">k</span>
+            <select
+              className="rounded border border-neutral-800 bg-black px-1.5 py-0.5 text-[10px] text-neutral-300 focus:border-blue-500 focus:outline-none"
+              value={k ?? "auto"}
+              onChange={(e) =>
+                setK(e.target.value === "auto" ? null : Number(e.target.value))
+              }
+              title="จำนวน cluster · auto = เลือกด้วย Elbow method"
+            >
+              <option value="auto">auto</option>
+              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
           </>
         )}
         <button
@@ -549,10 +572,68 @@ function ResultView({
     const d = result as ClusterData;
     if (!d?.points?.length) return <Empty />;
     return (
-      <ClusterCanvas data={d} descriptions={descriptions} height="100%" />
+      <div className="flex h-full gap-2">
+        <div className="min-w-0 flex-1">
+          <ClusterCanvas data={d} descriptions={descriptions} height="100%" />
+        </div>
+        {d.elbow && d.elbow.curve.length > 0 && <ElbowPlot elbow={d.elbow} />}
+      </div>
     );
   }
   return <Empty />;
+}
+
+// กราฟ inertia vs k สำหรับ Elbow method (จุดที่เลือกเป็นสีฟ้า)
+function ElbowPlot({ elbow }: { elbow: NonNullable<ClusterData["elbow"]> }) {
+  const W = 170;
+  const H = 150;
+  const P = 22;
+  const ks = elbow.curve.map((c) => c.k);
+  const ins = elbow.curve.map((c) => c.inertia);
+  const kMin = ks[0];
+  const kMax = ks[ks.length - 1];
+  const iMin = Math.min(...ins);
+  const iMax = Math.max(...ins);
+  const x = (k: number) => P + ((k - kMin) / Math.max(1, kMax - kMin)) * (W - 2 * P);
+  const y = (v: number) =>
+    H - P - ((v - iMin) / Math.max(1e-9, iMax - iMin)) * (H - 2 * P);
+  const path = elbow.curve
+    .map((c, i) => `${i ? "L" : "M"}${x(c.k).toFixed(1)},${y(c.inertia).toFixed(1)}`)
+    .join(" ");
+
+  return (
+    <div className="shrink-0 rounded border border-neutral-800 p-1 text-[10px] text-neutral-400">
+      <div className="mb-0.5">Elbow → k = {elbow.chosen}</div>
+      <svg width={W} height={H}>
+        <path d={path} fill="none" stroke="#525252" strokeWidth={1.5} />
+        {elbow.curve.map((c) => {
+          const on = c.k === elbow.chosen;
+          return (
+            <g key={c.k}>
+              <circle
+                cx={x(c.k)}
+                cy={y(c.inertia)}
+                r={on ? 4 : 2.5}
+                fill={on ? "#3b82f6" : "#737373"}
+              >
+                <title>{`k=${c.k} · inertia ${c.inertia}`}</title>
+              </circle>
+              <text
+                x={x(c.k)}
+                y={H - 6}
+                textAnchor="middle"
+                fontSize={8}
+                fill={on ? "#93c5fd" : "#737373"}
+              >
+                {c.k}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="text-center text-[9px] text-neutral-600">inertia vs k</div>
+    </div>
+  );
 }
 
 // จำนวนจุดที่ใช้ต่อ class + ที่ถูกตัดทิ้ง (class ที่ไม่ได้เลือก / none / NaN)

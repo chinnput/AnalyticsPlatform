@@ -18,6 +18,8 @@ export interface ClusterData {
   points: ClusterPoint[];
   // ตาราง cluster × class: rows[i].counts[j] = จำนวนจุดของ cluster i ที่อยู่ใน class j
   crosstab?: { classes: string[]; rows: { cluster: number; counts: number[] }[] };
+  // มีเมื่อเลือก k อัตโนมัติ: k ที่ Elbow เลือก + inertia ของแต่ละ k
+  elbow?: { chosen: number; curve: { k: number; inertia: number }[] };
 }
 
 const COLORS = [

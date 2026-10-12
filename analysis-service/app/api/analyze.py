@@ -46,6 +46,7 @@ class AnalyzeRequest(BaseModel):
     project: str | None = None  # ต้องมีเมื่อใช้ tag จากไฟล์ ("file:<id>/<col>")
     xTags: list[str] | None = None  # correlation: แกน X
     yTags: list[str] | None = None  # correlation: แกน Y
+    k: int | None = None  # clustering: จำนวน cluster (None = เลือกอัตโนมัติด้วย Elbow)
     classSpec: "ClassSpec | None" = None  # แบ่ง class (ดู app/pipeline/classify.py)
     sql: SqlSource | None = None
     iqr: IqrFilter | None = None
@@ -162,7 +163,9 @@ def _analyze_with_class(req: AnalyzeRequest) -> dict:
         }
     if req.type == "clustering":
         # filter = k-means เฉพาะ class ที่เลือก · split = เหมือนกัน + แนบ class ต่อจุด/crosstab
-        result = clustering(data[keep], labels=labels[keep] if spec.mode == "split" else None)
+        result = clustering(
+            data[keep], k=req.k, labels=labels[keep] if spec.mode == "split" else None
+        )
         return {"result": result, "classInfo": class_info}
     if spec.mode == "filter":
         return {"result": _ANALYZERS[req.type](data[keep]), "classInfo": class_info}
@@ -204,7 +207,7 @@ def analyze(req: AnalyzeRequest):
         if req.type == "histogram":
             return {"type": "histogram", "result": histogram(df)}
         if req.type == "clustering":
-            return {"type": "clustering", "result": clustering(df)}
+            return {"type": "clustering", "result": clustering(df, k=req.k)}
         raise ValueError(f"analysis type ไม่รองรับ: {req.type}")
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc))
