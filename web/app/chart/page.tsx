@@ -12,7 +12,7 @@ import AnalyticsPanel from "@/components/AnalyticsPanel";
 import ClassDefEditor from "@/components/ClassDefEditor";
 import { CLASS_PRESETS } from "@/lib/classPresets";
 import { classLabels } from "@/lib/types";
-import { fileIdOfTag } from "@/lib/types";
+import { displayTag, fileIdOfTag } from "@/lib/types";
 import type {
   ProjectFile,
   ChartClassUsage,
@@ -941,7 +941,7 @@ function ChartPage({ project }: { project: Project }) {
                                     className="max-w-[220px] truncate px-2 py-0.5 font-medium text-neutral-200"
                                     title={descriptions[tag] || tag}
                                   >
-                                    {descriptions[tag] || tag}
+                                    {descriptions[tag] || displayTag(tag)}
                                   </td>
                                   <td className="px-2 py-0.5 text-right tabular-nums">
                                     {s.count}
@@ -1062,7 +1062,7 @@ function ChartPage({ project }: { project: Project }) {
                       }
                       className="flex items-center gap-1 rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-[10px]"
                     >
-                      <span className="flex-1 truncate">{tag}</span>
+                      <span className="flex-1 truncate">{displayTag(tag)}</span>
                       <select
                         className="mini"
                         value={saved.find((s) => s.tag === tag)?.group || ""}
@@ -1244,7 +1244,7 @@ function ChartPage({ project }: { project: Project }) {
                                 : t.tag
                             }
                           >
-                            {t.tag}
+                            {displayTag(t.tag)}
                           </button>
                           <select
                             className="mini"

@@ -29,6 +29,9 @@ export interface ProjectFile {
 export const FILE_TAG_PREFIX = "file:";
 export const fileTag = (fileId: string, column: string) =>
   `${FILE_TAG_PREFIX}${fileId}/${column}`;
+// ชื่อที่แสดงบนหน้าจอ: ตัด "file:<id>/" ออก (รวมชื่อแบบ split เช่น "file:x/Kappa · D1" → "Kappa · D1")
+export const displayTag = (tag: string) => tag.replace(/file:[a-z0-9-]+\//g, "");
+
 export const fileIdOfTag = (tag: string) =>
   tag.startsWith(FILE_TAG_PREFIX)
     ? tag.slice(FILE_TAG_PREFIX.length).split("/")[0]

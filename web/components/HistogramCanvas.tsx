@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ReactECharts from "echarts-for-react";
+import { displayTag } from "@/lib/types";
 
 export interface HistogramSeries {
   tag: string;
@@ -24,7 +25,7 @@ export default function HistogramCanvas({
   descriptions?: Record<string, string>;
   height?: number | string;
 }) {
-  const label = (t: string) => descriptions?.[t] || t;
+  const label = (t: string) => descriptions?.[t] || displayTag(t);
   const [xMin, setXMin] = useState("");
   const [xMax, setXMax] = useState("");
   const [yMax, setYMax] = useState("");

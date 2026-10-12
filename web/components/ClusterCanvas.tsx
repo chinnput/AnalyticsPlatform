@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ReactECharts from "echarts-for-react";
+import { displayTag } from "@/lib/types";
 
 export interface ClusterPoint {
   x: number;
@@ -37,7 +38,7 @@ export default function ClusterCanvas({
   descriptions?: Record<string, string>;
   height?: number | string;
 }) {
-  const label = (t: string) => descriptions?.[t] || t;
+  const label = (t: string) => descriptions?.[t] || displayTag(t);
   const ct = data.crosstab;
   const [colorBy, setColorBy] = useState<"cluster" | "class">("cluster");
   const byClass = colorBy === "class" && !!ct;

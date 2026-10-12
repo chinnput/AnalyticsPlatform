@@ -1,6 +1,7 @@
 "use client";
 
 import ReactECharts from "echarts-for-react";
+import { displayTag } from "@/lib/types";
 
 export interface KdeCurve {
   tag: string;
@@ -23,7 +24,7 @@ export default function KdeCanvas({
   descriptions?: Record<string, string>;
   height?: number | string;
 }) {
-  const label = (t: string) => descriptions?.[t] || t;
+  const label = (t: string) => descriptions?.[t] || displayTag(t);
 
   const series = data.curves.map((c, i) => {
     const color = COLORS[i % COLORS.length];

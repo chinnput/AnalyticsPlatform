@@ -3,6 +3,7 @@
 import { useRef, useEffect } from "react";
 import ReactECharts from "echarts-for-react";
 import type EChartsReactCore from "echarts-for-react/lib/core";
+import { displayTag } from "@/lib/types";
 
 export interface ChartData {
   timestamps: string[];
@@ -107,7 +108,7 @@ export default function ChartCanvas({
   }, [drawMode, onPlaceAnnotation]);
 
   const seriesNames = Object.keys(data.series);
-  const label = (name: string) => descriptions[name] || name;
+  const label = (name: string) => descriptions[name] || displayTag(name);
 
   // โชว์ป้ายเวลาแค่ ~8 ป้าย ไม่ว่าจะมีกี่จุด (ลดความถี่แกน X)
   const labelStep = Math.max(0, Math.ceil(data.timestamps.length / 8) - 1);

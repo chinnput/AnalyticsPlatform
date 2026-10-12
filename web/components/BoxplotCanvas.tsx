@@ -1,6 +1,7 @@
 "use client";
 
 import ReactECharts from "echarts-for-react";
+import { displayTag } from "@/lib/types";
 
 export interface BoxplotData {
   tags: string[];
@@ -27,7 +28,7 @@ export default function BoxplotCanvas({
     grid: { left: 50, right: 20, top: 20, bottom: 60 },
     xAxis: {
       type: "category",
-      data: data.tags,
+      data: data.tags.map(displayTag),
       axisLabel: { fontSize: 10, color: "#737373", rotate: 20 },
       axisLine: { lineStyle: { color: "#333" } },
     },

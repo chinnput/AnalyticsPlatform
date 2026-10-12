@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CLASS_PRESETS } from "@/lib/classPresets";
-import type { ClassDef, SavedTag } from "@/lib/types";
+import { displayTag, type ClassDef, type SavedTag } from "@/lib/types";
 
 type ClassType = ClassDef["type"];
 
@@ -217,7 +217,8 @@ export default function ClassDefEditor({
         <datalist id="project-tags">
           {tags.map((t) => (
             <option key={t.tag} value={t.tag}>
-              {t.description}
+              {displayTag(t.tag)}
+              {t.description && t.description !== displayTag(t.tag) ? ` — ${t.description}` : ""}
             </option>
           ))}
         </datalist>

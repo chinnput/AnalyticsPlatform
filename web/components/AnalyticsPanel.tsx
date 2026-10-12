@@ -12,6 +12,7 @@ import ClusterCanvas, { ClusterData } from "@/components/ClusterCanvas";
 import { CLASS_PRESETS } from "@/lib/classPresets";
 import {
   classLabels,
+  displayTag,
   classTagsOf,
   type ClassDef,
   type ClassUsage,
@@ -124,7 +125,7 @@ export default function AnalyticsPanel({
 
   const single = SINGLE_TAG.includes(type);
   const isCorr = type === "correlation";
-  const label = (t: string) => descriptions[t] || t;
+  const label = (t: string) => descriptions[t] || displayTag(t);
 
   const canClass = CLASS_TYPES.includes(type);
   const classDef = classUse
@@ -497,7 +498,7 @@ function ResultView({
               key={r.tag}
               className="border-t border-neutral-800/60 text-neutral-300"
             >
-              <td className="px-2 py-1">{r.tag}</td>
+              <td className="px-2 py-1" title={r.tag}>{displayTag(r.tag)}</td>
               <td className="px-2 py-1 text-right">{r.count}</td>
               <td className="px-2 py-1 text-right">{r.min ?? "-"}</td>
               <td className="px-2 py-1 text-right">{r.max ?? "-"}</td>
@@ -523,7 +524,7 @@ function ResultView({
       <CorrelationHeatmap
         data={d}
         height="100%"
-        label={(t) => descriptions[t] || t}
+        label={(t) => descriptions[t] || displayTag(t)}
       />
     );
   }

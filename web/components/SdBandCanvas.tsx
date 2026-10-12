@@ -1,6 +1,7 @@
 "use client";
 
 import ReactECharts from "echarts-for-react";
+import { displayTag } from "@/lib/types";
 
 export interface SdSeries {
   tag: string;
@@ -29,7 +30,7 @@ export default function SdBandCanvas({
   descriptions?: Record<string, string>;
   height?: number | string;
 }) {
-  const label = (t: string) => descriptions?.[t] || t;
+  const label = (t: string) => descriptions?.[t] || displayTag(t);
 
   const series = data.series.flatMap((s, i) => {
     const c = COLORS[i % COLORS.length];
