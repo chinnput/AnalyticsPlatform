@@ -9,6 +9,7 @@ import SdBandCanvas, { SdData } from "@/components/SdBandCanvas";
 import KdeCanvas, { KdeData } from "@/components/KdeCanvas";
 import HistogramCanvas, { HistogramData } from "@/components/HistogramCanvas";
 import ClusterCanvas, { ClusterData } from "@/components/ClusterCanvas";
+import ChartCanvas from "@/components/ChartCanvas";
 import { CLASS_PRESETS } from "@/lib/classPresets";
 import {
   classLabels,
@@ -26,7 +27,8 @@ export type AnalysisKind =
   | "sd"
   | "kde"
   | "histogram"
-  | "clustering";
+  | "clustering"
+  | "function";
 
 export const ANALYSIS_TOOLS: { key: AnalysisKind; label: string }[] = [
   { key: "summary", label: "Summary" },
@@ -36,7 +38,28 @@ export const ANALYSIS_TOOLS: { key: AnalysisKind; label: string }[] = [
   { key: "kde", label: "KDE" },
   { key: "histogram", label: "Histogram" },
   { key: "clustering", label: "Clustering" },
+  { key: "function", label: "Function" },
 ];
+
+// สัญญาของฟังก์ชันจาก analysis-service (GET /functions)
+interface FunctionParamSpec {
+  type: "tag" | "float" | "int" | "bool" | "str";
+  label?: string;
+  default?: unknown;
+}
+interface FunctionMeta {
+  name: string;
+  title: string;
+  params: Record<string, FunctionParamSpec>;
+  output: "series" | "scalar";
+}
+// ผลจาก POST /functions/{name}/run
+interface FunctionOutput {
+  kind: "series" | "scalar";
+  timestamps?: string[];
+  series?: Record<string, (number | null)[]>;
+  value?: number | null;
+}
 
 // analysis ที่โฟกัส tag เดี่ยว (เลือกได้ 1 tag)
 const SINGLE_TAG: AnalysisKind[] = ["sd", "kde", "histogram"];
@@ -124,9 +147,14 @@ export default function AnalyticsPanel({
   const [msg, setMsg] = useState("");
   // clustering: null = เลือก k อัตโนมัติด้วย Elbow method (ไม่จำค่าไว้ใน project)
   const [k, setK] = useState<number | null>(null);
+  // function: รายการจาก analysis-service + ค่าที่กรอกในฟอร์ม (ไม่จำค่าไว้ใน project)
+  const [fnList, setFnList] = useState<FunctionMeta[]>([]);
+  const [fnName, setFnName] = useState<string>("");
+  const [fnParams, setFnParams] = useState<Record<string, string>>({});
 
   const single = SINGLE_TAG.includes(type);
   const isCorr = type === "correlation";
+  const fnMeta = fnList.find((f) => f.name === fnName) ?? null;
   const label = (t: string) => descriptions[t] || displayTag(t);
 
   const canClass = CLASS_TYPES.includes(type);
@@ -175,8 +203,109 @@ export default function AnalyticsPanel({
     );
   }
 
+  // โหลดรายการฟังก์ชันครั้งแรกที่เลือก type = Function
+  useEffect(() => {
+    if (type !== "function" || fnList.length) return;
+    fetch("/api/functions")
+      .then((r) => r.json())
+      .then((j) => {
+        const list: FunctionMeta[] = j.functions ?? [];
+        setFnList(list);
+        if (list[0]) setFnName((cur) => cur || list[0].name);
+        if (j.errors && Object.keys(j.errors).length) {
+          setMsg(`ฟังก์ชันบางตัวโหลดไม่ได้: ${Object.keys(j.errors).join(", ")}`);
+        }
+      })
+      .catch(() => setMsg("โหลดรายการฟังก์ชันไม่ได้"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [type]);
+
+  // รันฟังก์ชัน: ดึงข้อมูล tag ที่ใช้ตามช่วงเวลาของแผง แล้วส่งให้ analysis-service
+  async function runFunction() {
+    if (!fnMeta) {
+      setResult(null);
+      setMsg("");
+      return;
+    }
+    const params: Record<string, unknown> = {};
+    const needTags: string[] = [];
+    for (const [pname, spec] of Object.entries(fnMeta.params)) {
+      const name = spec.label ?? pname;
+      const raw = fnParams[pname] ?? (spec.default != null ? String(spec.default) : "");
+      if (spec.type === "tag") {
+        if (!raw) {
+          setResult(null);
+          setMsg(`เลือก tag สำหรับ "${name}"`);
+          return;
+        }
+        needTags.push(raw);
+        params[pname] = raw;
+      } else if (spec.type === "bool") {
+        params[pname] = raw === "true";
+      } else if (spec.type === "str") {
+        params[pname] = raw;
+      } else {
+        const num = Number(raw);
+        if (raw === "" || Number.isNaN(num)) {
+          setMsg(`กรอกตัวเลขให้ "${name}"`);
+          return;
+        }
+        params[pname] = spec.type === "int" ? Math.trunc(num) : num;
+      }
+    }
+    const range = resolveRange(needTags);
+    if (!range) {
+      setMsg("เลือกช่วงเวลา custom ก่อน (หรือ project ยังไม่มีไฟล์)");
+      return;
+    }
+    setBusy(true);
+    setMsg("");
+    try {
+      const dataRes = await fetch("/api/data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "pi",
+          project: projectId,
+          tags: needTags,
+          start: range.start,
+          end: range.end,
+          interval,
+        }),
+      });
+      const dataJson = await dataRes.json();
+      if (!dataRes.ok) {
+        setMsg(dataJson.detail || dataJson.error || "Failed to load data");
+        setResult(null);
+        return;
+      }
+      const res = await fetch(`/api/functions/${encodeURIComponent(fnMeta.name)}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          data: { timestamps: dataJson.timestamps, series: dataJson.series },
+          params,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setMsg(json.detail || json.error || "Function failed");
+        setResult(null);
+        return;
+      }
+      setResult(json.output ?? null);
+      setClassInfo(null);
+    } catch {
+      setMsg("Service unreachable");
+      setResult(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const run = useRef<() => void>(() => {});
   run.current = async () => {
+    if (type === "function") return runFunction();
     if (isCorr) {
       if (xTags.length === 0 || yTags.length === 0) {
         setResult(null);
@@ -254,7 +383,7 @@ export default function AnalyticsPanel({
   useEffect(() => {
     run.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type, tags, xTags, yTags, classUse, classDef, interval, k]);
+  }, [type, tags, xTags, yTags, classUse, classDef, interval, k, fnName]);
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded border border-neutral-800 bg-neutral-950">
@@ -271,7 +400,60 @@ export default function AnalyticsPanel({
             </option>
           ))}
         </select>
-        {isCorr ? (
+        {type === "function" ? (
+          <>
+            <select
+              className="max-w-[160px] rounded border border-neutral-800 bg-black px-1.5 py-0.5 text-[10px] text-neutral-300 focus:border-blue-500 focus:outline-none"
+              value={fnName}
+              onChange={(e) => {
+                setFnName(e.target.value);
+                setFnParams({});
+              }}
+            >
+              {fnList.map((f) => (
+                <option key={f.name} value={f.name}>
+                  {f.title}
+                </option>
+              ))}
+            </select>
+            {fnMeta &&
+              Object.entries(fnMeta.params).map(([pname, spec]) =>
+                spec.type === "tag" ? (
+                  <select
+                    key={pname}
+                    className="max-w-[160px] rounded border border-neutral-800 bg-black px-1.5 py-0.5 text-[10px] text-neutral-300 focus:border-blue-500 focus:outline-none"
+                    value={fnParams[pname] ?? ""}
+                    onChange={(e) =>
+                      setFnParams((p) => ({ ...p, [pname]: e.target.value }))
+                    }
+                    title={spec.label ?? pname}
+                  >
+                    <option value="">{spec.label ?? pname}…</option>
+                    {saved.map((s) => (
+                      <option key={s.tag} value={s.tag}>
+                        {label(s.tag)}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <label
+                    key={pname}
+                    className="flex items-center gap-1 text-[10px] text-neutral-500"
+                  >
+                    {spec.label ?? pname}
+                    <input
+                      type="number"
+                      className="w-16 rounded border border-neutral-800 bg-black px-1 py-0.5 text-[10px] text-neutral-300 focus:border-blue-500 focus:outline-none"
+                      value={fnParams[pname] ?? String(spec.default ?? "")}
+                      onChange={(e) =>
+                        setFnParams((p) => ({ ...p, [pname]: e.target.value }))
+                      }
+                    />
+                  </label>
+                ),
+              )}
+          </>
+        ) : isCorr ? (
           <>
             <span className="text-[10px] text-neutral-500">X</span>
             <TagPicker
@@ -417,7 +599,12 @@ export default function AnalyticsPanel({
         )}
         {result != null && (
           <div className="min-h-0 flex-1">
-            <ResultView type={type} result={result} descriptions={descriptions} />
+            <ResultView
+              type={type}
+              result={result}
+              descriptions={descriptions}
+              interval={interval}
+            />
           </div>
         )}
       </div>
@@ -493,10 +680,12 @@ function ResultView({
   type,
   result,
   descriptions,
+  interval,
 }: {
   type: AnalysisKind;
   result: unknown;
   descriptions: Record<string, string>;
+  interval: string;
 }) {
   if (type === "summary") {
     const rows = result as SummaryRow[];
@@ -577,6 +766,27 @@ function ResultView({
           <ClusterCanvas data={d} descriptions={descriptions} height="100%" />
         </div>
         {d.elbow && d.elbow.curve.length > 0 && <ElbowPlot elbow={d.elbow} />}
+      </div>
+    );
+  }
+  if (type === "function") {
+    const d = result as FunctionOutput;
+    if (d?.kind === "scalar") {
+      return (
+        <div className="flex h-full items-center justify-center text-lg text-neutral-200">
+          {d.value == null ? "—" : d.value.toFixed(4)}
+        </div>
+      );
+    }
+    const series = d?.series ?? {};
+    if (!d?.timestamps?.length || !Object.keys(series).length) return <Empty />;
+    return (
+      <div className="h-full overflow-auto">
+        <ChartCanvas
+          data={{ timestamps: d.timestamps, series }}
+          interval={interval}
+          descriptions={descriptions}
+        />
       </div>
     );
   }
